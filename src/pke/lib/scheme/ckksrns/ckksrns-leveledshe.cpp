@@ -43,6 +43,7 @@ CKKS implementation. See https://eprint.iacr.org/2020/1118 for details.
 #include <map>
 #include <memory>
 #include <utility>
+#include <limits>
 #include <vector>
 
 namespace lbcrypto {
@@ -160,8 +161,20 @@ void LeveledSHECKKSRNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, std::c
 void LeveledSHECKKSRNS::EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, ConstPlaintext& plaintext) const {
     LeveledSHERNS::EvalMultInPlace(ciphertext, plaintext);
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-    if (cryptoParams->GetScalingTechnique() != NORESCALE)
+    auto scalTech           = cryptoParams->GetScalingTechnique();
+    if (scalTech == FLEXIBLEAUTO || scalTech == FLEXIBLEAUTOEXT || scalTech == COMPOSITESCALINGAUTO ||
+        scalTech == COMPOSITESCALINGMANUAL) {
+        // For FLEXIBLE*/COMPOSITESCALING*, set the post-multiply scaling factor from the precomputed table
+        // (the canonical "big" scaling factor for this level) rather than squaring the ciphertext's tracked
+        // scaling factor on the fly. The plaintext was encoded at the canonical GetScalingFactorReal(level),
+        // so the product's scale is that canonical value squared; squaring the *tracked* SF instead compounds
+        // any accumulated drift (composite scaling) into a multiplicative value error that grows with depth.
+        ciphertext->SetScalingFactor(cryptoParams->GetScalingFactorRealBig(ciphertext->GetLevel()));
+    }
+    else if (scalTech != NORESCALE) {
+        // FIXEDMANUAL / FIXEDAUTO use a fixed scaling factor; keep the original on-the-fly behavior.
         ciphertext->SetScalingFactor(ciphertext->GetScalingFactor() * ciphertext->GetScalingFactor());
+    }
 }
 
 /////////////////////////////////////////
@@ -186,8 +199,7 @@ void LeveledSHECKKSRNS::ModReduceInternalInPlace(Ciphertext<DCRTPoly>& ciphertex
 
     for (size_t i = 0; i < levels; ++i) {
         for (auto& dcrtpoly : cv)
-            dcrtpoly.DropLastElementAndScale(cryptoParams->GetQlQlInvModqlDivqlModq(diffQl + i),
-                                             cryptoParams->GetqlInvModq(diffQl + i));
+            dcrtpoly.DropLastElementAndScale(cryptoParams->GetqlInvModq(diffQl + i));
         double modReduceFactor = cryptoParams->GetModReduceFactor(sizeQl - 1 - i);
         ciphertext->SetScalingFactor(ciphertext->GetScalingFactor() / modReduceFactor);
     }
@@ -490,11 +502,11 @@ std::vector<DCRTPoly::Integer> LeveledSHECKKSRNS::GetElementForEvalMult(ConstCip
 
     DoubleInteger large     = static_cast<DoubleInteger>(operand / approxFactor * scFactor + 0.5);
     DoubleInteger large_abs = (large < 0 ? -large : large);
-    DoubleInteger bound     = static_cast<uint64_t>(1) << 63;
+    DoubleInteger bound     = static_cast<DoubleInteger>(std::numeric_limits<int64_t>::max());
 
     std::vector<DCRTPoly::Integer> factors(numTowers);
 
-    if (large_abs >= bound) {
+    if (large_abs > bound) {
         for (uint32_t i = 0; i < numTowers; i++) {
             DoubleInteger reduced = large % moduli[i].ConvertToInt();
 

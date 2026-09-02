@@ -201,15 +201,6 @@ public:
    * @return the format, either COEFFICIENT or EVALUATION
    */
     Format GetFormat() const override = 0;
-    //    return this->GetDerived().GetFormat();
-
-    /**
-   * @brief returns the parameters of the element.
-   * @return the element parameter set.
-   */
-    const std::shared_ptr<Params>& GetParams() const {
-        return this->GetDerived().GetParams();
-    }
 
     /**
    * @brief returns the element's cyclotomic order
@@ -239,9 +230,7 @@ public:
    * @brief returns the element's root of unity.
    * @return the element's root of unity.
    */
-    // TODO: this doesn't look right
-    const BigIntType GetRootOfUnity() const {
-        //        return BigIntType(0);
+    const BigIntType& GetRootOfUnity() const {
         return this->GetDerived().GetParams()->GetRootOfUnity();
     }
 
@@ -519,7 +508,6 @@ public:
    * @return is the result of the addition.
    */
     DerivedType Plus(const DerivedType& rhs) const override = 0;
-    //    return this->GetDerived().Plus(rhs);
 
     /**
    * @brief Performs a multiplication operation and returns the result.
@@ -528,7 +516,6 @@ public:
    * @return is the result of the multiplication.
    */
     DerivedType Times(const DerivedType& rhs) const override = 0;
-    //    return this->GetDerived().Times(rhs);
 
     /**
    * @brief Performs a subtraction operation and returns the result.
@@ -820,16 +807,12 @@ public:
 
     /**
    * @brief Drops the last element in the double-CRT representation and scales
-   * down by the last CRT modulus. The resulting DCRTPoly element will have one
-   * less tower.
-   * @param &QlQlInvModqlDivqlModq precomputed values for
-   * [Q^(l)*[Q^(l)^{-1}]_{q_l}/q_l]_{q_i}
-   * @param &QlQlInvModqlDivqlModqPrecon NTL-specific precomputations
+   * down by the last CRT modulus, computing round(x/q_l) as
+   * (x - [x]_{q_l}) * [q_l^{-1}]_{q_i}. The resulting DCRTPoly element will
+   * have one less tower and is always in EVALUATION format.
    * @param &qlInvModq precomputed values for [q_l^{-1}]_{q_i}
-   * @param &qlInvModqPrecon NTL-specific precomputations
    */
-    virtual void DropLastElementAndScale(const std::vector<NativeInteger>& QlQlInvModqlDivqlModq,
-                                         const std::vector<NativeInteger>& qlInvModq) = 0;
+    virtual void DropLastElementAndScale(const std::vector<NativeInteger>& qlInvModq) = 0;
 
     /**
    * @brief ModReduces reduces the DCRTPoly element's composite modulus by

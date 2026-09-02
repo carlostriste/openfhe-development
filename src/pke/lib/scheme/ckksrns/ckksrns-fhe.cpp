@@ -29,6 +29,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //==================================================================================
 
+#ifdef BOOTSTRAPTIMING
+    #define PROFILE
+#endif
+
 #include "ciphertext.h"
 #include "cryptocontext.h"
 #include "key/evalkeyrelin.h"
@@ -47,6 +51,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -54,11 +59,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#ifdef BOOTSTRAPTIMING
-    #include <ostream>
-    #define PROFILE
-#endif
 
 namespace {
 // GetBigModulus() calculates the big modulus as the product of
@@ -244,12 +244,32 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
 
         uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
 
-        double qDouble  = GetBigModulus(cryptoParams);
-        double factor   = std::ldexp(1.0, static_cast<int>(std::round(std::log2(qDouble))));
-        double pre      = (compositeDegree > 1) ? 1.0 : qDouble / factor;
-        double scaleEnc = pre / k;
-        // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-        double scaleDec = (compositeDegree > 1) ? qDouble / cryptoParams->GetScalingFactorReal(0) : 1.0 / pre;
+        double qDouble = GetBigModulus(cryptoParams);
+        double factor  = std::ldexp(1.0, static_cast<int>(std::round(std::log2(qDouble))));
+        // For composite scaling, capture the (inexact) overflow normalization SF0/qDouble as a coefficient
+        // close to 1, SF0*post/qDouble, which the CoeffsToSlots/SlotsToCoeffs matrices encode at full
+        // precision and telescope away (scaleDec = 1/scaleEnc*1/k cancels it). The exact power-of-two part
+        // 1/post is applied as the shrink and restored by the integer "scalar" in EvalBootstrap. This
+        // mirrors the FLEXIBLEAUTO scaling structure and avoids the precision loss of folding a tiny
+        // non-power-of-two constant into a single plaintext multiply.
+        double pre;
+        double post = 1.0;
+        if (compositeDegree > 1) {
+            double powP = std::pow(2, cryptoParams->GetPlaintextModulus());
+            post        = std::pow(2, std::round(std::log2(qDouble / powP)));
+            pre         = cryptoParams->GetScalingFactorReal(0) * post / qDouble;
+        }
+        else {
+            pre = qDouble / factor;
+        }
+        // For composite scaling, fold the exact power-of-two 2^-deg = 1/post shrink into the
+        // CoeffsToSlots matrix (scaleEnc) instead of applying it as a scalar before CoeffsToSlots (see
+        // EvalBootstrap). This keeps the CtS rotations operating on the full-magnitude message, so the
+        // key-switch noise they add scales down together with the signal (2^deg is restored by the
+        // integer "scalar" after the sine) rather than being amplified by 2^deg. scaleDec inverts the
+        // residual c1 only; the exact 2^deg telescopes against the integer restore.
+        double scaleEnc = ((compositeDegree > 1) ? pre / post : pre) / k;
+        double scaleDec = 1.0 / pre;
 
         // compute # of levels to remain when encoding the coefficients
         // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
@@ -435,12 +455,27 @@ void FHECKKSRNS::EvalBootstrapPrecompute(const CryptoContextImpl<DCRTPoly>& cc, 
 
     uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
 
-    double qDouble  = GetBigModulus(cryptoParams);
-    double factor   = std::ldexp(1.0, static_cast<int>(std::round(std::log2(qDouble))));
-    double pre      = (compositeDegree > 1) ? 1.0 : qDouble / factor;
-    double scaleEnc = pre / k;
-    // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double scaleDec = (compositeDegree > 1) ? qDouble / cryptoParams->GetScalingFactorReal(0) : 1.0 / pre;
+    double qDouble = GetBigModulus(cryptoParams);
+    double factor  = std::ldexp(1.0, static_cast<int>(std::round(std::log2(qDouble))));
+    // For composite scaling, capture the (inexact) overflow normalization SF0/qDouble as a coefficient
+    // close to 1, SF0*post/qDouble, encoded at full precision in the CoeffsToSlots/SlotsToCoeffs matrices
+    // and telescoped away; the exact power-of-two 1/post is applied as the shrink/scalar (see EvalBootstrap).
+    double pre;
+    double post = 1.0;
+    if (compositeDegree > 1) {
+        double powP = std::pow(2, cryptoParams->GetPlaintextModulus());
+        post        = std::pow(2, std::round(std::log2(qDouble / powP)));
+        pre         = cryptoParams->GetScalingFactorReal(0) * post / qDouble;
+    }
+    else {
+        pre = qDouble / factor;
+    }
+    // For composite scaling, fold the exact power-of-two 2^-deg = 1/post shrink into the CoeffsToSlots
+    // matrix (scaleEnc) instead of applying it as a scalar before CoeffsToSlots (see EvalBootstrap), so
+    // the CtS rotations act on the full-magnitude message and their key-switch noise scales down with
+    // the signal rather than being amplified by 2^deg. scaleDec inverts the residual c1 only.
+    double scaleEnc = ((compositeDegree > 1) ? pre / post : pre) / k;
+    double scaleDec = 1.0 / pre;
 
     // compute # of levels to remain when encoding the coefficients
     // for FLEXIBLEAUTOEXT we do not need extra modulus in auxiliary plaintexts
@@ -796,7 +831,12 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
     double post         = std::pow(2, static_cast<double>(deg));
 
     // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double pre      = (compositeDegree > 1) ? cryptoParams->GetScalingFactorReal(0) / qDouble : 1. / post;
+    // For FLEXIBLE* the exact power-of-two 1/post is applied here as the shrink before CoeffsToSlots and
+    // restored by the integer "scalar" after the sine. For composite scaling the entire overflow
+    // normalization (the exact 2^-deg = 1/post AND the residual c1) is carried by the CoeffsToSlots/
+    // SlotsToCoeffs matrix coefficients (see EvalBootstrapSetup), so no shrink is applied here; this
+    // keeps the CtS rotations on the full-magnitude message and avoids amplifying their noise by 2^deg.
+    double pre      = (compositeDegree > 1) ? 1.0 : 1. / post;
     uint64_t scalar = std::llround(post);
 
     //------------------------------------------------------------------------------
@@ -937,6 +977,13 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
             }
         }
 
+#ifdef BOOTSTRAPTIMING
+        timeEncode = TOC(t);
+        std::cerr << "Encoding time: " << timeEncode / 1000.0 << " s" << std::endl;
+        // Running Approximate Mod Reduction
+        TIC(t);
+#endif
+
         //------------------------------------------------------------------------------
         // Running Approximate Mod Reduction
         //------------------------------------------------------------------------------
@@ -961,10 +1008,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
         algo->MultByMonomialInPlace(ctxtEncI, slots);
         cc->EvalAddInPlaceNoCheck(ctxtEnc, ctxtEncI);
 
-        if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-            // scale the message back up after Chebyshev interpolation
-            algo->MultByIntegerInPlace(ctxtEnc, scalar);
-        }
+        // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+        // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+        // StC matrix, see EvalBootstrapSetup)
+        algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
         timeModReduce = TOC(t);
@@ -1025,7 +1072,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
 
 #ifdef BOOTSTRAPTIMING
         timeEncode = TOC(t);
-        std::cerr << "\nEncoding time: " << timeEncode / 1000.0 << " s" << std::endl;
+        std::cerr << "Encoding time: " << timeEncode / 1000.0 << " s" << std::endl;
         // Running Approximate Mod Reduction
         TIC(t);
 #endif
@@ -1044,10 +1091,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
         ApplyDoubleAngleIterations(ctxtEnc, numIter);
 
         // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-        if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-            // scale the message back up after Chebyshev interpolation
-            algo->MultByIntegerInPlace(ctxtEnc, scalar);
-        }
+        // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+        // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+        // StC matrix, see EvalBootstrapSetup)
+        algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
         timeModReduce = TOC(t);
@@ -1078,7 +1125,11 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrap(ConstCiphertext<DCRTPoly>& cipher
 
 #ifdef BOOTSTRAPTIMING
     timeDecode = TOC(t);
+<<<<<<< HEAD
     std::cout << "Decoding time: " << timeDecode << " s" << std::endl;
+=======
+    std::cerr << "Decoding time: " << timeDecode / 1000.0 << " s" << std::endl;
+>>>>>>> tags/fideslib-ref-v1.5.1.7
 #endif
 
     // If we start with more towers, than we obtain from bootstrapping, return the original ciphertext.
@@ -1152,7 +1203,6 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
         }
 
         // Step 6 and 7: Calculate the bootstrapping error by subtracting the original ciphertext from the bootstrapped ciphertext. Mod down to q is done implicitly.
-        // cc->GetScheme()->AdjustLevelsAndDepthInPlace(ctBootstrappedScaledDown, ctScaledUp);
         auto ctBootstrappingError = cc->EvalSub(ctBootstrappedScaledDown, ctScaledUp);
 
         // Step 8: Bootstrap the error.
@@ -1200,7 +1250,12 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
     double post         = std::pow(2, static_cast<double>(deg));
 
     // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    double pre      = (compositeDegree > 1) ? cryptoParams->GetScalingFactorReal(0) / qDouble : 1. / post;
+    // For FLEXIBLE* the exact power-of-two 1/post is applied here as the shrink before CoeffsToSlots and
+    // restored by the integer "scalar" after the sine. For composite scaling the entire overflow
+    // normalization (the exact 2^-deg = 1/post AND the residual c1) is carried by the CoeffsToSlots/
+    // SlotsToCoeffs matrix coefficients (see EvalBootstrapSetup), so no shrink is applied here; this
+    // keeps the CtS rotations on the full-magnitude message and avoids amplifying their noise by 2^deg.
+    double pre      = (compositeDegree > 1) ? 1.0 : 1. / post;
     uint64_t scalar = std::llround(post);
 
     //------------------------------------------------------------------------------
@@ -1283,6 +1338,10 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
     }
 
     Ciphertext<DCRTPoly> ctxtEnc;
+#ifdef BOOTSTRAPTIMING
+    TIC(t);
+#endif
+
     //------------------------------------------------------------------------------
     // Running SlotToCoeff
     //------------------------------------------------------------------------------
@@ -1300,8 +1359,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
 
 #ifdef BOOTSTRAPTIMING
     timeDecode = TOC(t);
-
-    std::cout << "Decoding time: " << timeDecode / 1000.0 << " s" << std::endl;
+    std::cerr << "Decoding time: " << timeDecode / 1000.0 << " s" << std::endl;
 #endif
 
     //------------------------------------------------------------------------------
@@ -1415,7 +1473,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
 
 #ifdef BOOTSTRAPTIMING
     timeEncode = TOC(t);
-    std::cerr << "\nEncoding time: " << timeEncode / 1000.0 << " s" << std::endl;
+    std::cerr << "Encoding time: " << timeEncode / 1000.0 << " s" << std::endl;
     // Running Approximate Mod Reduction
     TIC(t);
 #endif
@@ -1448,17 +1506,14 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
         cc->EvalAddInPlaceNoCheck(ctxtEnc, ctxtEncI);
     }
 
-    // TODO: YSP Can be extended to FLEXIBLE* scaling techniques as well as the closeness of 2^p to moduli is no longer needed
-    if (st != COMPOSITESCALINGAUTO && st != COMPOSITESCALINGMANUAL) {
-        // scale the message back up after Chebyshev interpolation
-        algo->MultByIntegerInPlace(ctxtEnc, scalar);
-    }
+    // scale the message back up after Chebyshev interpolation; for composite scaling this restores
+    // the exact power-of-two 2^deg via an integer multiply (the residual ~1 coefficient lives in the
+    // StC matrix, see EvalBootstrapSetup)
+    algo->MultByIntegerInPlace(ctxtEnc, scalar);
 
 #ifdef BOOTSTRAPTIMING
     timeModReduce = TOC(t);
     std::cerr << "Approximate modular reduction time: " << timeModReduce / 1000.0 << " s" << std::endl;
-    // Running SlotToCoeff
-    TIC(t);
 #endif
 
 #if NATIVEINT != 128
@@ -2487,82 +2542,33 @@ void FHECKKSRNS::AdjustCiphertextFBT(Ciphertext<DCRTPoly>& ciphertext, double co
 
 void FHECKKSRNS::ExtendCiphertext(std::vector<DCRTPoly>& ctxtDCRTs, const CryptoContextImpl<DCRTPoly>& cc,
                                   const std::shared_ptr<DCRTPoly::Params> elementParamsRaisedPtr) const {
-    // TODO: YSP We should be able to use one of the DCRTPoly methods for this; If not, we can define a new method there and use it here
+    // Raise each ciphertext polynomial from the small bottom RNS basis Ql = {q_0, ..., q_{compositeDegree-1}}
+    // (the moduli remaining in the depleted ciphertext) to the full raised basis Q. We use the exact
+    // DCRTPoly::ExpandCRTBasis (CRT reconstruction with the integer-overflow / "alpha" correction), which
+    // produces the balanced representative of [c]_Ql in (-Ql/2, Ql/2].
+    // All CRT tables are precomputed in CryptoParametersCKKSRNS::PrecomputeCRTTables (at cryptocontext
+    // instantiation), so this function stays in full RNS.
 
-    // CompositeDegree = 2: [a]_q0q1     =     [a*q1^-1]_q0 *     q1 + [a*q0^-1]_q1 *q0
-    // CompositeDegree = 3: [a]_q0q1q2   =   [a*q1q2^-1]_q0 *   q1q2 + [a*q0q2^-1]_q1 *q0q2 + [a*q0q1^-1]_q2 *q0q1
-    // CompositeDegree = 4: [a]_q0q1q2q3 = [a*q1q2q3^-1]_q0 * q1q2q3 + [a*q0q2q3^-1]_q1 * q0q2q3 + [a*q0q1q3^-1]_q2 * q0q1q3 + [a*q0q1q2^-1]_q3 * q0q1q2
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
+    const uint32_t sizeQl   = cryptoParams->GetCompositeDegree();  // bottom moduli: source basis Ql
 
-    const auto cryptoParams  = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
-    uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
-
-    const auto& raisedParams       = elementParamsRaisedPtr->GetParams();
-    const uint32_t numRaisedTowers = raisedParams.size();
-
-    std::vector<NativeInteger> qj(compositeDegree);
-    for (uint32_t j = 0; j < compositeDegree; ++j) {
-        qj[j] = raisedParams[j]->GetModulus().ConvertToInt();
-    }
-
-    std::vector<NativeInteger> qhat_modqj(compositeDegree);
-    qhat_modqj[0] = qj[1].Mod(qj[0]);
-    qhat_modqj[1] = qj[0].Mod(qj[1]);
-    for (uint32_t d = 2; d < compositeDegree; d++) {
-        for (uint32_t j = 0; j < d; ++j)
-            qhat_modqj[j] = qj[d].ModMul(qhat_modqj[j], qj[j]);
-        qhat_modqj[d] = qj[1].ModMul(qj[0], qj[d]);
-        for (uint32_t j = 2; j < d; ++j)
-            qhat_modqj[d] = qj[j].ModMul(qhat_modqj[d], qj[d]);
-    }
-
-    std::vector<NativeInteger> qhat_inv_modqj(compositeDegree);
-    for (uint32_t j = 0; j < compositeDegree; ++j)
-        qhat_inv_modqj[j] = qhat_modqj[j].ModInverse(qj[j]);
-
-    NativeInteger qjProduct =
-        std::accumulate(qj.begin() + 1, qj.end(), NativeInteger{1}, std::multiplies<NativeInteger>());
-    uint32_t init_element_index = compositeDegree;
+    const auto& paramsComplQl = cryptoParams->GetParamsModRaiseComplQl();
+    if (nullptr == paramsComplQl)
+        OPENFHE_THROW("The modulus-raise tables are not available (they are precomputed for compositeDegree > 1).");
+    if (elementParamsRaisedPtr->GetParams().size() != sizeQl + paramsComplQl->GetParams().size())
+        OPENFHE_THROW("The raised element parameters do not match the precomputed modulus-raise tables.");
 
     for (auto& dcrt : ctxtDCRTs) {
-        dcrt.SetFormat(COEFFICIENT);
-
-        std::vector<DCRTPoly> tmp(compositeDegree + 1, DCRTPoly(elementParamsRaisedPtr, COEFFICIENT));
-        std::vector<DCRTPoly> ctxtDCRTs_modq(compositeDegree, DCRTPoly(elementParamsRaisedPtr, COEFFICIENT));
-
-        const size_t numEl = dcrt.GetNumOfElements();
-#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(numEl))
-        for (size_t j = 0; j < numEl; ++j) {
-            const auto& ej = dcrt.GetElementAtIndex(j);
-            for (uint32_t k = 0; k < compositeDegree; ++k)
-                ctxtDCRTs_modq[k].SetElementAtIndex(j, ej * qhat_inv_modqj[k]);
-        }
-
-        tmp[0] = ctxtDCRTs_modq[0].GetElementAtIndex(0);
-
-#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(tmp[0].GetAllElements().size()))
-        for (auto& el : tmp[0].GetAllElements())
-            el *= qjProduct;
-
-        for (uint32_t d = 1; d < compositeDegree; ++d) {
-            tmp[init_element_index] = ctxtDCRTs_modq[d].GetElementAtIndex(d);
-
-            NativeInteger qjProductD{1};
-            for (uint32_t k = 0; k < compositeDegree; ++k) {
-                if (k != d) {
-                    qjProductD *= qj[k];
-                    tmp[d].SetElementAtIndex(k, tmp[0].GetElementAtIndex(k) * qj[k]);
-                }
-            }
-
-            for (uint32_t j = compositeDegree; j < numRaisedTowers; ++j)
-                tmp[d].SetElementAtIndex(j, tmp[init_element_index].GetElementAtIndex(j) * qjProductD);
-
-            tmp[d].SetElementAtIndex(d, tmp[init_element_index].GetElementAtIndex(d) * qjProductD);
-            tmp[0] += tmp[d];
-        }
-
-        tmp[0].SetFormat(EVALUATION);
-        dcrt = std::move(tmp[0]);
+        // CKKS modulus raise only uses the bottom (level-0) modulus q0 = product of the first compositeDegree
+        // primes (analogous to the single-prime path, which keeps only index 0). If the input ciphertext still
+        // carries more towers, keep just the bottom sizeQl before extending, so the source basis matches the
+        // precomputed tables (otherwise ExpandCRTBasis would index the tables out of bounds, corrupting memory).
+        if (dcrt.GetNumOfElements() > sizeQl)
+            dcrt.DropLastElements(dcrt.GetNumOfElements() - sizeQl);
+        dcrt.ExpandCRTBasis(elementParamsRaisedPtr, paramsComplQl, cryptoParams->GetModRaiseQlHatInvModq(),
+                            cryptoParams->GetModRaiseQlHatInvModqPrecon(), cryptoParams->GetModRaiseQlHatModComplq(),
+                            cryptoParams->GetModRaiseAlphaQlModComplq(), cryptoParams->GetModRaiseModComplqBarrettMu(),
+                            cryptoParams->GetModRaiseqInv(), Format::EVALUATION);
     }
 }
 
@@ -2665,7 +2671,10 @@ Plaintext FHECKKSRNS::MakeAuxPlaintext(const CryptoContextImpl<DCRTPoly>& cc, co
             re = re64 >> (-pRemaining);
         }
         else {
-            int128_t pPowRemaining = ((int128_t)1) << pRemaining;
+            if (pRemaining > 126)
+                OPENFHE_THROW("Invalid CKKS scaling shift");
+
+            int128_t pPowRemaining = static_cast<int128_t>(1) << pRemaining;
             re                     = pPowRemaining * re64;
         }
 
@@ -2676,6 +2685,9 @@ Plaintext FHECKKSRNS::MakeAuxPlaintext(const CryptoContextImpl<DCRTPoly>& cc, co
             im = im64 >> (-pRemaining);
         }
         else {
+            if (pRemaining > 126)
+                OPENFHE_THROW("Invalid CKKS scaling shift");
+
             int128_t pPowRemaining = static_cast<int128_t>(1) << pRemaining;
             im                     = pPowRemaining * im64;
         }
@@ -2976,6 +2988,31 @@ void FHECKKSRNS::FitToNativeVector(uint32_t ringDim, const std::vector<int64_t>&
     NativeInteger diff = bigBound - modulus;
     uint32_t dslots    = vec.size();
     uint32_t gap       = ringDim / dslots;
+#if defined(HAVE_INT128) && NATIVEINT == 64
+    // word-scaled-reciprocal reduction (one multiply per element instead of a divide);
+    // unlike ComputeMu/ModMu Barrett it is valid for the full 64-bit input range.
+    // The biased values are nonnegative, so the int64 -> uint64 conversion is value-preserving.
+    const uint64_t q{modulus.ConvertToInt<uint64_t>()};
+    const int64_t e{static_cast<int64_t>(GetMSB(q)) - 2};
+    if (e >= 1) {
+        const uint64_t half{static_cast<uint64_t>(bigBound) >> 1};
+        const uint64_t diffR{(static_cast<uint64_t>(bigBound) - q) % q};
+        const uint64_t mu{static_cast<uint64_t>((static_cast<unsigned __int128>(1) << (64 + e)) / q)};
+        for (uint32_t i = 0; i < dslots; ++i) {
+            const uint64_t v{static_cast<uint64_t>(vec[i])};
+            uint64_t av{v};
+            if (av >= q) {
+                av -= static_cast<uint64_t>((static_cast<unsigned __int128>(v) * mu) >> 64 >> e) * q;
+                if (av >= q)
+                    av -= q;
+            }
+            uint64_t t{av - (diffR & (0 - static_cast<uint64_t>(v > half)))};
+            t += q & (0 - (t >> 63));
+            (*nativeVec)[gap * i] = t;
+        }
+        return;
+    }
+#endif
     for (uint32_t i = 0; i < dslots; ++i) {
         NativeInteger n(vec[i]);
         if (n > bigValueHf) {
@@ -3009,6 +3046,25 @@ void FHECKKSRNS::FitToNativeVector(uint32_t ringDim, const std::vector<int128_t>
 }
 #endif
 
+// CKKS Functional Bootstrapping implements the tower-drop and rescaling conventions only for the
+// techniques below. Composite scaling is not supported yet: it needs a level-specific scaling-factor
+// chain whose rescalings are multiples of the composite degree, which the tower drops here do not follow.
+// The whole 128-bit build is rejected as well, for every scaling technique: functional bootstrapping has
+// no counterpart to the correction-factor scaling path that standard CKKS bootstrapping implements for
+// 128 bits, and enabling the unit tests on a 128-bit build shows every case, the FIXED* modes included,
+// producing silently wrong results. Supporting it is future work.
+static void ValidateFBTScalingTechnique([[maybe_unused]] const std::shared_ptr<CryptoParametersCKKSRNS>& cryptoParams) {
+#if NATIVEINT == 128
+    OPENFHE_THROW("CKKS Functional Bootstrapping is not supported for the 128-bit build (NATIVE_SIZE == 128).");
+#else
+    auto st = cryptoParams->GetScalingTechnique();
+    if (st != FIXEDMANUAL && st != FIXEDAUTO && st != FLEXIBLEAUTO && st != FLEXIBLEAUTOEXT)
+        OPENFHE_THROW(
+            "CKKS Functional Bootstrapping is supported for the FIXEDMANUAL, FIXEDAUTO, FLEXIBLEAUTO, and "
+            "FLEXIBLEAUTOEXT methods only.");
+#endif
+}
+
 template <typename VectorDataType>
 void FHECKKSRNS::EvalFBTSetupInternal(const CryptoContextImpl<DCRTPoly>& cc, const std::vector<VectorDataType>& coeffs,
                                       uint32_t numSlots, const BigInteger& PIn, const BigInteger& POut,
@@ -3016,10 +3072,9 @@ void FHECKKSRNS::EvalFBTSetupInternal(const CryptoContextImpl<DCRTPoly>& cc, con
                                       const std::vector<uint32_t>& dim1, const std::vector<uint32_t>& levelBudget,
                                       uint32_t lvlsAfterBoot, uint32_t depthLeveledComputation, size_t order) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
-    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
-        OPENFHE_THROW("CKKS Functional Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
         OPENFHE_THROW("CKKS Functional Bootstrapping is only supported for the Hybrid key switching method.");
+    ValidateFBTScalingTechnique(cryptoParams);
 
     uint32_t M     = cc.GetCyclotomicOrder();
     uint32_t slots = (numSlots == 0) ? M / 4 : numSlots;
@@ -3082,11 +3137,18 @@ void FHECKKSRNS::EvalFBTSetupInternal(const CryptoContextImpl<DCRTPoly>& cc, con
     }
 
     auto& params = pubKey->GetPublicElements()[0].GetParams()->GetParams();
-    uint32_t cnt = 0;
+
+    // The output of functional bootstrapping keeps 1 + lvlsAfterBoot towers, so the modulus chain has to
+    // be long enough to provide them. Without this check the loop below reads past the end of the params
+    // vector and the level arithmetic further down wraps around.
+    if (lvlsAfterBoot >= params.size())
+        OPENFHE_THROW("lvlsAfterBoot (" + std::to_string(lvlsAfterBoot) +
+                      ") is too large: it must be less than the number of moduli (" + std::to_string(params.size()) +
+                      ").");
 
     BigInteger QPrime = params[0]->GetModulus();
-    while (lvlsAfterBoot-- > 0)
-        QPrime *= params[++cnt]->GetModulus();
+    for (uint32_t i = 1; i <= lvlsAfterBoot; ++i)
+        QPrime *= params[i]->GetModulus();
 
     BigInteger q    = cryptoParams->GetElementParams()->GetParams()[0]->GetModulus().ConvertToInt();
     auto qDouble    = q.ConvertToLongDouble();
@@ -3099,7 +3161,41 @@ void FHECKKSRNS::EvalFBTSetupInternal(const CryptoContextImpl<DCRTPoly>& cc, con
     uint32_t depthBT = depthLeveledComputation + GetFBTDepth(levelBudget, coeffs, PIn, order, skd);
 
     // compute # of levels to remain when encoding the coefficients
-    uint32_t L0   = cryptoParams->GetElementParams()->GetParams().size();
+    // for FLEXIBLEAUTOEXT the raised ciphertext does not include the extra modulus
+    auto st     = cryptoParams->GetScalingTechnique();
+    uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
+
+    if (st == FLEXIBLEAUTO || st == FLEXIBLEAUTOEXT) {
+        // In the FLEXIBLE* modes, the ciphertext right after ModRaise is declared to carry the exact
+        // level-specific scaling factor (so that all subsequent operations stay on the precomputed
+        // scaling-factor chain), while the FBT scale bookkeeping above is done in terms of the nominal
+        // power-of-two scaling factor 2^p. The two ratios below convert between the conventions:
+        // - scaleEnc absorbs SF(raised level)/2^p so the values entering the Chebyshev interpolation
+        //   match the nominal convention exactly;
+        // - scaleDec absorbs 2^p/SF(final level) so the decoded RLWE output lands at the exact absolute
+        //   scale QPrime/POut regardless of the level-specific scaling factor at the output level.
+        double pow2p         = std::pow(2.0, static_cast<double>(cryptoParams->GetPlaintextModulus()));
+        uint32_t raisedLevel = (st == FLEXIBLEAUTOEXT) ? 1 : 0;
+        // the output of functional bootstrapping has 1 + lvlsAfterBoot towers remaining
+        uint32_t finalLevel = L0 - 1 - lvlsAfterBoot;
+        scaleEnc *= cryptoParams->GetScalingFactorReal(raisedLevel) / pow2p;
+        scaleDec *= pow2p / cryptoParams->GetScalingFactorReal(finalLevel);
+    }
+
+    L0 -= (st == FLEXIBLEAUTOEXT);
+
+    // The encoding and decoding matrices are precomputed at the levels below, which have to exist on the
+    // chain. Checking here reports the parameter that is actually wrong, instead of letting the unsigned
+    // subtractions wrap and failing later inside the plaintext encoding with an unrelated message.
+    if (levelBudget[0] >= L0)
+        OPENFHE_THROW("The encoding level budget (" + std::to_string(levelBudget[0]) +
+                      ") is too large for the available number of levels (" + std::to_string(L0) + ").");
+    if (depthBT > L0)
+        OPENFHE_THROW("The functional bootstrapping depth (" + std::to_string(depthBT) +
+                      ") exceeds the available number of levels (" + std::to_string(L0) +
+                      "). Increase the multiplicative depth, or reduce the level budget or "
+                      "depthLeveledComputation.");
+
     uint32_t lEnc = L0 - levelBudget[0] - 1;
     uint32_t lDec = L0 - depthBT;
 
@@ -3157,20 +3253,51 @@ void FHECKKSRNS::EvalFBTSetup(const CryptoContextImpl<DCRTPoly>& cc, const std::
 Ciphertext<DCRTPoly> FHECKKSRNS::EvalHomDecoding(ConstCiphertext<DCRTPoly>& ciphertext, uint64_t postScaling,
                                                  uint32_t levelToReduce) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+    ValidateFBTScalingTechnique(cryptoParams);
 
     auto ctxtEnc = ciphertext->Clone();
 
     // Drop levels if needed
     auto cc = ciphertext->GetCryptoContext();
-    if (levelToReduce > 0)
-        cc->LevelReduceInPlace(ctxtEnc, nullptr, levelToReduce);
+    auto st = cryptoParams->GetScalingTechnique();
+    if (levelToReduce > 0) {
+        if (st == FIXEDMANUAL) {
+            cc->LevelReduceInPlace(ctxtEnc, nullptr, levelToReduce);
+        }
+        else if (st == FLEXIBLEAUTO || st == FLEXIBLEAUTOEXT) {
+            // In the FLEXIBLE* modes, towers cannot simply be dropped because the ciphertext has to stay
+            // on the chain of level-specific scaling factors. As in AdjustLevelsAndDepthInPlace, a single
+            // scalar multiplication adjusts the value to the scaling factor of the destination level, the
+            // remaining towers are dropped directly, and the destination scaling factor is set explicitly.
+            // Note that for a degree-2 input, EvalMultInPlace first rescales (consuming one tower).
+            uint32_t dstLevel = ctxtEnc->GetLevel() + levelToReduce;
+            uint32_t curLevel = ctxtEnc->GetLevel() + (ctxtEnc->GetNoiseScaleDeg() == 2);
+            // The level-specific scaling factors are precomputed only up to the second-to-last level
+            // (the accessors silently fall back for larger indices), and the rescale before
+            // SlotsToCoeffs consumes one more tower anyway.
+            uint32_t sizeQ = cryptoParams->GetElementParams()->GetParams().size();
+            if (dstLevel > sizeQ - 2)
+                OPENFHE_THROW("levelToReduce is too large: the level after reduction (" + std::to_string(dstLevel) +
+                              ") must be at most " + std::to_string(sizeQ - 2) + ".");
+            cc->EvalMultInPlace(ctxtEnc, cryptoParams->GetScalingFactorRealBig(dstLevel) /
+                                             cryptoParams->GetScalingFactorRealBig(curLevel));
+            if (dstLevel > ctxtEnc->GetLevel())
+                cc->GetScheme()->LevelReduceInternalInPlace(ctxtEnc, dstLevel - ctxtEnc->GetLevel());
+            ctxtEnc->SetScalingFactor(cryptoParams->GetScalingFactorRealBig(dstLevel));
+        }
+        else {
+            // FIXEDAUTO uses the same scaling factor at every level, so towers can be dropped directly
+            // (the public LevelReduce is a no-op for the AUTO modes).
+            cc->GetScheme()->LevelReduceInternalInPlace(ctxtEnc, levelToReduce);
+        }
+    }
 
     //------------------------------------------------------------------------------
     // Running SlotsToCoeffs
     //------------------------------------------------------------------------------
 
     // In the case of FLEXIBLEAUTO, we need one extra tower
-    if (cryptoParams->GetScalingTechnique() != FIXEDMANUAL)
+    if (st != FIXEDMANUAL)
         cc->GetScheme()->ModReduceInternalInPlace(ctxtEnc, BASE_NUM_LEVELS_TO_DROP);
 
     // linear transform for decoding
@@ -3191,7 +3318,12 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalHomDecoding(ConstCiphertext<DCRTPoly>& ciph
     if (postScaling > 1)
         cc->GetScheme()->MultByIntegerInPlace(ctxtDec, postScaling);
 
-    cc->ModReduceInPlace(ctxtDec);
+    // The public ModReduce is a no-op for the AUTO scaling techniques, so the internal rescaling is
+    // called explicitly to bring the result to noise degree 1 (the RLWE output convention).
+    if (st == FIXEDMANUAL)
+        cc->ModReduceInPlace(ctxtDec);
+    else
+        cc->GetScheme()->ModReduceInternalInPlace(ctxtDec, BASE_NUM_LEVELS_TO_DROP);
 
     // 64-bit only: No need to scale back the message to its original scale.
     return ctxtDec;
@@ -3202,12 +3334,26 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
     ConstCiphertext<DCRTPoly>& ciphertext, const std::vector<VectorDataType>& coefficients, uint32_t digitBitSize,
     const BigInteger& initialScaling, size_t order) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
-        OPENFHE_THROW("CKKS Functional Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
         OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
 
-    const auto& paramsQ = cryptoParams->GetElementParams()->GetParams();
+    ValidateFBTScalingTechnique(cryptoParams);
+    auto st               = cryptoParams->GetScalingTechnique();
+    const bool isFlexible = (st == FLEXIBLEAUTO || st == FLEXIBLEAUTOEXT);
+
+    // The RLWE-imported payload must not include the FLEXIBLEAUTOEXT extra modulus, so the input has
+    // to be imported at least one level deep (SchemeletRLWEMP applies this offset automatically).
+    if (st == FLEXIBLEAUTOEXT && ciphertext->GetLevel() == 0)
+        OPENFHE_THROW(
+            "For FLEXIBLEAUTOEXT, the input to CKKS Functional Bootstrapping must be at level 1 or deeper so that it "
+            "does not include the extra modulus.");
+
+    // For FLEXIBLEAUTOEXT the raised ciphertext does not include the extra modulus
+    auto elementParamsRaised = *(cryptoParams->GetElementParams());
+    if (st == FLEXIBLEAUTOEXT)
+        elementParamsRaised.PopLastParam();
+
+    const auto& paramsQ = elementParamsRaised.GetParams();
     uint32_t sizeQ      = paramsQ.size();
     std::vector<NativeInteger> moduli(sizeQ);
     std::vector<NativeInteger> roots(sizeQ);
@@ -3226,7 +3372,12 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
     // because the message doesn't have to be scaled down.
     // Instead, we need to correct the encoding if it originates from a different ciphertext
     // (not typical CKKS).
-    double correction = cryptoParams->GetScalingFactorRealBig(0) / initialScaling.ConvertToDouble();
+    // For FLEXIBLE* the correction is expressed w.r.t. the nominal power-of-two scaling factor 2^p
+    // (the residual ratio between 2^p and the level-specific scaling factor is folded into the
+    // homomorphic encoding/decoding matrices in EvalFBTSetup).
+    double nominalSF  = (isFlexible) ? std::pow(2.0, static_cast<double>(cryptoParams->GetPlaintextModulus())) :
+                                       cryptoParams->GetScalingFactorReal(0);
+    double correction = nominalSF / initialScaling.ConvertToDouble();
 
     //------------------------------------------------------------------------------
     // RAISING THE MODULUS
@@ -3238,8 +3389,26 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
 
     // If correction ~ 1, we should not do this adjustment and save a level
     // AA: make the check more granular (around 1.0000x?)
-    if (std::llround(correction) != 1.0)
-        AdjustCiphertextFBT(raised, correction);
+    // For FLEXIBLE* the correction is instead folded into the multiplication by 1/(k*N) after ModRaise,
+    // which does not consume an extra level.
+    if (!isFlexible) {
+        if (std::llround(correction) != 1.0)
+            AdjustCiphertextFBT(raised, correction);
+    }
+    else {
+        // The modulus raise below keeps only tower 0, so a multi-tower input (an initialScaling that
+        // spans several RNS limbs, e.g. when levels are available before bootstrapping) must first be
+        // brought down to a single tower by rounded rescaling. Each rescale divides the raw payload by
+        // the dropped modulus, which correction absorbs, so the residual w.r.t. the nominal 2^p is
+        // still folded in exactly after ModRaise. The noise scale degree is restored because the raw
+        // payload is not on the CKKS scaling convention.
+        while (raised->GetElements()[0].GetNumOfElements() > 1) {
+            uint32_t deg = raised->GetNoiseScaleDeg();
+            correction *= raised->GetElements()[0].GetParams()->GetParams().back()->GetModulus().ConvertToDouble();
+            algo->ModReduceInternalInPlace(raised, 1);
+            raised->SetNoiseScaleDeg(deg);
+        }
+    }
 
     uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size();
     if (cryptoParams->GetSecretKeyDist() == SPARSE_ENCAPSULATED) {
@@ -3275,6 +3444,13 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
         raised->SetLevel(L0 - ctxtDCRTs[0].GetNumOfElements());
     }
 
+    // In the FLEXIBLE* modes, declare the raised ciphertext to carry the exact scaling factor of its level,
+    // so all subsequent operations track the precomputed chain of level-specific scaling factors. The ratio
+    // between this scaling factor and the nominal 2^p is compensated in the homomorphic encoding matrix
+    // (see EvalFBTSetup).
+    if (isFlexible)
+        raised->SetScalingFactor(cryptoParams->GetScalingFactorReal(raised->GetLevel()));
+
 #ifdef BOOTSTRAPTIMING
     std::cerr << "\nNumber of levels at the beginning of bootstrapping: "
               << raised->GetElements()[0].GetNumOfElements() - 1 << std::endl;
@@ -3287,7 +3463,8 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
     auto skd = cryptoParams->GetSecretKeyDist();
     double k = (skd == SPARSE_TERNARY || skd == SPARSE_ENCAPSULATED) ? 1.0 : K_UNIFORM;
 
-    cc->EvalMultInPlace(raised, 1.0 / (k * N));
+    // For FLEXIBLE* the initial-scaling correction is folded in here so no extra level is consumed.
+    cc->EvalMultInPlace(raised, ((isFlexible) ? correction : 1.0) / (k * N));
 
     // no linear transformations are needed for Chebyshev series as the range has been normalized to [-1,1]
     double coeffLowerBound = -1.0;
@@ -3298,6 +3475,7 @@ std::shared_ptr<seriesPowers<DCRTPoly>> FHECKKSRNS::EvalMVBPrecomputeInternal(
     bool isLTBootstrap = (p.m_paramsEnc.lvlb == 1) && (p.m_paramsDec.lvlb == 1);
 
     std::vector<Ciphertext<DCRTPoly>> ctxtEnc;
+    ctxtEnc.reserve(2);
     std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers;
 
     if (slots == M / 4) {
@@ -3483,10 +3661,9 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalMVBNoDecodingInternal(const std::shared_ptr
                                                            uint32_t digitBitSize, size_t order) {
     const auto cryptoParams =
         std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertexts->powersRe[0]->GetCryptoParameters());
-    if (cryptoParams->GetScalingTechnique() == FLEXIBLEAUTO || cryptoParams->GetScalingTechnique() == FLEXIBLEAUTOEXT)
-        OPENFHE_THROW("CKKS Functional Bootstrapping is supported for FIXEDMANUAL and FIXEDAUTO methods only.");
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
         OPENFHE_THROW("CKKS Bootstrapping is only supported for the Hybrid key switching method.");
+    ValidateFBTScalingTechnique(cryptoParams);
 
     auto cc        = ciphertexts->powersRe[0]->GetCryptoContext();
     uint32_t M4    = cc->GetCyclotomicOrder() / 4;
@@ -3508,8 +3685,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalMVBNoDecodingInternal(const std::shared_ptr
         //------------------------------------------------------------------------------
 
         if (digitBitSize == 1 && order == 1) {
-            ctxtEnc  = ciphertexts->powersRe[0];
-            ctxtEncI = ciphertexts->powersIm[0];
+            ctxtEnc  = ciphertexts->powersRe[0]->Clone();
+            ctxtEncI = ciphertexts->powersIm[0]->Clone();
             // Assumes the function is integer and real!
             if (ToReal(coefficients[1]) > 0) {  // MultByInteger only works with positive integers
                 algo->MultByIntegerInPlace(ctxtEnc, ToReal(coefficients[1]));
@@ -3563,7 +3740,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalMVBNoDecodingInternal(const std::shared_ptr
         //------------------------------------------------------------------------------
 
         if (digitBitSize == 1 && order == 1) {
-            ctxtEnc = ciphertexts->powersRe[0];
+            ctxtEnc = ciphertexts->powersRe[0]->Clone();
             // Assumes the function is integer and real!
             if (ToReal(coefficients[1]) > 0) {  // MultByInteger only works with positive integers
                 algo->MultByIntegerInPlace(ctxtEnc, ToReal(coefficients[1]));
@@ -3758,48 +3935,50 @@ EvalKey<DCRTPoly> FHECKKSRNS::KeySwitchGenSparse(const PrivateKey<DCRTPoly>& old
                                                  const PrivateKey<DCRTPoly>& newPrivateKey) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(newPrivateKey->GetCryptoParameters());
 
-    const auto paramsQ = cryptoParams->GetElementParams();
-    const auto paramsP = cryptoParams->GetParamsP();
+    // Params for q0*P', where P' is the auxiliary modulus for sparse encapsulation (two
+    // primes generated in CryptoParametersCKKSRNS::PrecomputeCRTTables)
+    const auto& paramsqp = cryptoParams->GetSparseKSParamsQP();
+    if (nullptr == paramsqp)
+        OPENFHE_THROW("The sparse key switching tables are only precomputed for SPARSE_ENCAPSULATED.");
 
-    // Build params for p*q (used for sparse encapsulation)
-    std::vector<NativeInteger> moduli{paramsQ->GetParams()[0]->GetModulus(), paramsP->GetParams()[0]->GetModulus()};
-    std::vector<NativeInteger> roots{paramsQ->GetParams()[0]->GetRootOfUnity(),
-                                     paramsP->GetParams()[0]->GetRootOfUnity()};
-
-    auto paramsqp = std::make_shared<typename DCRTPoly::Params>(2 * paramsQ->GetRingDimension(), moduli, roots);
+    size_t sizeQP = paramsqp->GetParams().size();
 
     const DCRTPoly& sOld = oldPrivateKey->GetPrivateElement();
     const DCRTPoly& sNew = newPrivateKey->GetPrivateElement();
 
-    // creates the old key in pq
-    auto polysOld = sOld.GetElementAtIndex(0);
-    polysOld.SetFormat(COEFFICIENT);
-    DCRTPoly sOldExt(paramsqp, Format::COEFFICIENT, true);
-    sOldExt.SetElementAtIndex(0, polysOld);
-    polysOld.SwitchModulus(moduli[1], roots[1], 0, 0);
-    sOldExt.SetElementAtIndex(1, std::move(polysOld));
-    sOldExt.SetFormat(Format::EVALUATION);
+    // extends a secret key from q0 to q0*P'; the source basis has a single limb, so the
+    // centered lift (SwitchModulus) is the exact CRT basis extension
+    auto ExtendToQP = [&paramsqp, sizeQP](const DCRTPoly& s) {
+        auto poly = s.GetElementAtIndex(0);
+        poly.SetFormat(Format::COEFFICIENT);
+        DCRTPoly sExt(paramsqp, Format::COEFFICIENT, false);
+        sExt.SetElementAtIndex(0, poly);
+        for (size_t j = 1; j < sizeQP; ++j) {
+            auto polyP = poly;
+            polyP.SwitchModulus(paramsqp->GetParams()[j]->GetModulus(), paramsqp->GetParams()[j]->GetRootOfUnity(), 0,
+                                0);
+            sExt.SetElementAtIndex(j, std::move(polyP));
+        }
+        sExt.SetFormat(Format::EVALUATION);
+        return sExt;
+    };
 
-    // creates the new key in pq
-    auto polysNew = sNew.GetElementAtIndex(0);
-    polysNew.SetFormat(COEFFICIENT);
-    DCRTPoly sNewExt(paramsqp, Format::COEFFICIENT, true);
-    sNewExt.SetElementAtIndex(0, polysNew);
-    polysNew.SwitchModulus(moduli[1], roots[1], 0, 0);
-    sNewExt.SetElementAtIndex(1, std::move(polysNew));
-    sNewExt.SetFormat(Format::EVALUATION);
+    // creates the old and new keys in q0*P'
+    DCRTPoly sOldExt = ExtendToQP(sOld);
+    DCRTPoly sNewExt = ExtendToQP(sNew);
 
     DugType dug;
     DCRTPoly a(dug, paramsqp, Format::EVALUATION);
     DCRTPoly e(cryptoParams->GetDiscreteGaussianGenerator(), paramsqp, Format::EVALUATION);
-    DCRTPoly b(paramsqp, Format::EVALUATION, true);
+    DCRTPoly b(paramsqp, Format::EVALUATION, false);
 
-    NativeInteger pModq = moduli[1].Mod(moduli[0]);
-
-    // computes the switching key for the GHS case
-    b.SetElementAtIndex(0, -a.GetElementAtIndex(0) * sNewExt.GetElementAtIndex(0) + pModq * sOld.GetElementAtIndex(0) +
+    // computes the switching key for the GHS case: b = -a*sNew + P'*sOld + e over q0*P';
+    // as [P']_{p'_j} = 0, the P'*sOld term only contributes modulo q0
+    b.SetElementAtIndex(0, -a.GetElementAtIndex(0) * sNewExt.GetElementAtIndex(0) +
+                               cryptoParams->GetSparseKSPModq() * sOldExt.GetElementAtIndex(0) +
                                e.GetElementAtIndex(0));
-    b.SetElementAtIndex(1, -a.GetElementAtIndex(1) * sNewExt.GetElementAtIndex(1) + e.GetElementAtIndex(1));
+    for (size_t j = 1; j < sizeQP; ++j)
+        b.SetElementAtIndex(j, -a.GetElementAtIndex(j) * sNewExt.GetElementAtIndex(j) + e.GetElementAtIndex(j));
 
     auto ek(std::make_shared<EvalKeyRelinImpl<DCRTPoly>>(newPrivateKey->GetCryptoContext()));
     ek->SetAVector({std::move(a)});
@@ -3809,39 +3988,60 @@ EvalKey<DCRTPoly> FHECKKSRNS::KeySwitchGenSparse(const PrivateKey<DCRTPoly>& old
 }
 
 Ciphertext<DCRTPoly> FHECKKSRNS::KeySwitchSparse(Ciphertext<DCRTPoly>& ciphertext, const EvalKey<DCRTPoly>& ek) {
-    auto paramsqp = ek->GetAVector()[0].GetParams();
-    auto modulusq = paramsqp->GetParams()[0]->GetModulus();
-    auto rootq    = paramsqp->GetParams()[0]->GetRootOfUnity();
-    auto modulusp = paramsqp->GetParams()[1]->GetModulus();
-    auto rootp    = paramsqp->GetParams()[1]->GetRootOfUnity();
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
+
+    const auto paramsqp = ek->GetAVector()[0].GetParams();
+    const auto& paramsP = cryptoParams->GetSparseKSParamsP();
+    if (nullptr == paramsP)
+        OPENFHE_THROW("The sparse key switching tables are only precomputed for SPARSE_ENCAPSULATED.");
+
+    size_t sizeP = paramsP->GetParams().size();
 
     auto& cv = ciphertext->GetElements();
-    // extend cv[1] from q to qp
-    DCRTPoly c1Ext(paramsqp, Format::EVALUATION, true);
+
+    // extend cv[1] from q0 to q0*P'; the source basis has a single limb, so the centered
+    // lift (SwitchModulus) is the exact CRT basis extension
+    DCRTPoly c1Ext(paramsqp, Format::EVALUATION, false);
     c1Ext.SetElementAtIndex(0, cv[1].GetElementAtIndex(0));
     auto poly = cv[1].GetElementAtIndex(0);
     poly.SetFormat(Format::COEFFICIENT);
-    poly.SwitchModulus(modulusp, rootp, 0, 0);
-    poly.SetFormat(Format::EVALUATION);
-    c1Ext.SetElementAtIndex(1, std::move(poly));
+    for (size_t j = 0; j < sizeP; ++j) {
+        auto polyP = poly;
+        polyP.SwitchModulus(paramsP->GetParams()[j]->GetModulus(), paramsP->GetParams()[j]->GetRootOfUnity(), 0, 0);
+        polyP.SetFormat(Format::EVALUATION);
+        c1Ext.SetElementAtIndex(j + 1, std::move(polyP));
+    }
 
     // multiply by the evaluation key
     std::vector<DCRTPoly> cvRes{c1Ext * ek->GetBVector()[0], c1Ext * ek->GetAVector()[0]};
 
-    NativeInteger pModInvq = modulusp.ModInverse(modulusq);
-
-    // modswitch cvRes from p*q to q, i.e., compute round(cvRes/p) mod q
-    // In RNS, we use the technique described in Appendix B.2.2 of https://eprint.iacr.org/2021/204 for the BFV case, i.e., for t=1.
+    // modswitch cvRes from q0*P' to q0, i.e., compute round(cvRes/P') mod q0.
+    // In RNS, we use the technique described in Appendix B.2.2 of https://eprint.iacr.org/2021/204
+    // for the BFV case, i.e., for t=1. The balanced representative of [cvRes]_{P'} is computed
+    // with the exact (HPS-style) CRT basis switch, which applies the floating-point overflow
+    // correction instead of dropping the alpha*P' term, so the modulus switch only adds the
+    // centered rounding noise.
 
     for (uint32_t i = 0; i < 2; ++i) {
-        auto polyP = cvRes[i].GetElementAtIndex(1);
-        polyP.SetFormat(Format::COEFFICIENT);
-        polyP.SwitchModulus(modulusq, rootq, 0, 0);
+        DCRTPoly partP(paramsP, Format::COEFFICIENT, false);
+        for (size_t j = 0; j < sizeP; ++j) {
+            auto polyP = cvRes[i].GetElementAtIndex(j + 1);
+            polyP.SetFormat(Format::COEFFICIENT);
+            partP.SetElementAtIndex(j, std::move(polyP));
+        }
+        // exact switch of the balanced [cvRes]_{P'} to the basis {q0}
+        auto partPModq =
+            partP.SwitchCRTBasis(cryptoParams->GetSparseKSParamsQ(), cryptoParams->GetSparseKSPHatInvModp(),
+                                 cryptoParams->GetSparseKSPHatInvModpPrecon(), cryptoParams->GetSparseKSPHatModq(),
+                                 cryptoParams->GetSparseKSAlphaPModq(), cryptoParams->GetSparseKSModqBarrettMu(),
+                                 cryptoParams->GetSparseKSpInv());
+        auto polyP = partPModq.GetElementAtIndex(0);
         polyP.SetFormat(Format::EVALUATION);
-        cvRes[i].DropLastElement();
+
+        cvRes[i].DropLastElements(sizeP);
         auto polyQ = cvRes[i].GetElementAtIndex(0);
         polyQ -= polyP;
-        polyQ *= pModInvq;
+        polyQ *= cryptoParams->GetSparseKSPInvModq();
         cvRes[i].SetElementAtIndex(0, std::move(polyQ));
     }
 

@@ -197,13 +197,15 @@ public:
    * @param scalTech scaling technique
    * @param addOne should an extra bit be added (for CKKS and BGV)
    * @param isNoiseFloodingMultiparty whether threshold FHE uses noise flooding multiparty mode (BGV and BFV)
+   * @param compositeDegree composite degree (for CKKS only)
    *
    * @return log2 of the modulus and number of RNS limbs.
    */
     static std::pair<double, uint32_t> EstimateLogP(uint32_t numPartQ, double firstModulusSize, double dcrtBits,
                                                     double extraModulusSize, uint32_t numPrimes, uint32_t auxBits,
                                                     ScalingTechnique scalTech, bool addOne = false,
-                                                    bool isNoiseFloodingMultiparty = false);
+                                                    bool isNoiseFloodingMultiparty = false,
+                                                    uint32_t compositeDegree       = 1);
 
     /*
    * Estimates the extra modulus bitsize needed for threshold FHE noise flooding (only for BGV and BFV)
@@ -304,26 +306,6 @@ public:
     /////////////////////////////////////
     // CKKSrns : DropLastElementAndScale
     /////////////////////////////////////
-
-    /**
-   * Q^(l) = \prod_{j=0}^{l-1}
-   * Gets the precomputed table of [Q^(l)*[Q^(l)^{-1}]_{q_l}/q_l]_{q_i}
-   *
-   * @return the precomputed table
-   */
-    const std::vector<NativeInteger>& GetQlQlInvModqlDivqlModq(size_t i) const {
-        return m_QlQlInvModqlDivqlModq[i];
-    }
-
-    /**
-   * Q^(l) = \prod_{j=0}^{l-1}
-   * Gets the NTL precomputions for [Q^(l)*[Q^(l)^{-1}]_{q_l}/q_l]_{q_i}
-   *
-   * @return the precomputed table
-   */
-    const std::vector<NativeInteger>& GetQlQlInvModqlDivqlModqPrecon(size_t i) const {
-        return m_QlQlInvModqlDivqlModqPrecon[i];
-    }
 
     /**
    * Gets the precomputed table of [q_i^{-1}]_{q_j}
@@ -1437,14 +1419,6 @@ public:
     /////////////////////////////////////
     // CKKSrns/BFVrns DropLastElementAndScale
     /////////////////////////////////////
-
-    // Q^(l) = \prod_{j=0}^{l-1}
-    // Stores [Q^(l)*[Q^(l)^{-1}]_{q_l}/q_l]_{q_i}
-    std::vector<std::vector<NativeInteger>> m_QlQlInvModqlDivqlModq;
-
-    // Q^(l) = \prod_{j=0}^{l-1}
-    // Stores NTL precomputations for [Q^(l)*[Q^(l)^{-1}]_{q_l}/q_l]_{q_i}
-    std::vector<std::vector<NativeInteger>> m_QlQlInvModqlDivqlModqPrecon;
 
     // Stores [q_l^{-1}]_{q_i}
     std::vector<std::vector<NativeInteger>> m_qlInvModq;

@@ -35,14 +35,18 @@ CKKS implementation. See https://eprint.iacr.org/2020/1118 for details.
 
 #define PROFILE
 
+#include "math/dftransform.h"
+
 #include "scheme/ckksrns/ckksrns-cryptoparameters.h"
 
+#include <algorithm>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace lbcrypto {
 
-// Precomputation of CRT tables encryption, decryption, and  homomorphic
-// multiplication
+// Precomputation of CRT tables encryption, decryption, and  homomorphic multiplication
 void CryptoParametersCKKSRNS::PrecomputeCRTTables(KeySwitchTechnique ksTech, ScalingTechnique scalTech,
                                                   EncryptionTechnique encTech, MultiplicationTechnique multTech,
                                                   uint32_t numPartQ, uint32_t auxBits, uint32_t extraBits) {
@@ -59,27 +63,16 @@ void CryptoParametersCKKSRNS::PrecomputeCRTTables(KeySwitchTechnique ksTech, Sca
         rootsQ[i]  = GetElementParams()->GetParams()[i]->GetRootOfUnity();
     }
 
-    BigInteger modulusQ = GetElementParams()->GetModulus();
     // Pre-compute values for rescaling
-    // modulusQ holds Q^(l) = \prod_{i=0}^{i=l}(q_i).
-    m_QlQlInvModqlDivqlModq.resize(sizeQ - 1);
-    m_QlQlInvModqlDivqlModqPrecon.resize(sizeQ - 1);
     m_qlInvModq.resize(sizeQ - 1);
     m_qlInvModqPrecon.resize(sizeQ - 1);
     for (size_t k = 0; k < sizeQ - 1; k++) {
         size_t l = sizeQ - (k + 1);
-        modulusQ = modulusQ / BigInteger(moduliQ[l]);
-        m_QlQlInvModqlDivqlModq[k].resize(l);
-        m_QlQlInvModqlDivqlModqPrecon[k].resize(l);
         m_qlInvModq[k].resize(l);
         m_qlInvModqPrecon[k].resize(l);
-        BigInteger QlInvModql = modulusQ.ModInverse(moduliQ[l]);
-        BigInteger result     = (QlInvModql * modulusQ) / BigInteger(moduliQ[l]);
         for (uint32_t i = 0; i < l; i++) {
-            m_QlQlInvModqlDivqlModq[k][i]       = result.Mod(moduliQ[i]).ConvertToInt();
-            m_QlQlInvModqlDivqlModqPrecon[k][i] = m_QlQlInvModqlDivqlModq[k][i].PrepModMulConst(moduliQ[i]);
-            m_qlInvModq[k][i]                   = moduliQ[l].ModInverse(moduliQ[i]);
-            m_qlInvModqPrecon[k][i]             = m_qlInvModq[k][i].PrepModMulConst(moduliQ[i]);
+            m_qlInvModq[k][i]       = moduliQ[l].ModInverse(moduliQ[i]);
+            m_qlInvModqPrecon[k][i] = m_qlInvModq[k][i].PrepModMulConst(moduliQ[i]);
         }
     }
 
@@ -179,6 +172,163 @@ void CryptoParametersCKKSRNS::PrecomputeCRTTables(KeySwitchTechnique ksTech, Sca
         for (uint32_t i = 0; i < sizeQ; i++) {
             m_modqBarrettMu[i] = (BarrettBase128Bit / BigInteger(moduliQ[i])).ConvertToInt<DoubleNativeInt>();
         }
+    }
+
+    /////////////////////////////////////
+    // Composite scaling : bootstrapping modulus raise (ExtendCiphertext)
+    // Tables for the exact CRT basis extension (DCRTPoly::ExpandCRTBasis) from the small
+    // bottom basis Ql = {q_0, ..., q_{d-1}}, d = compositeDegree (the towers remaining in
+    // the depleted ciphertext), to the full basis Q. ComplQl = {q_d, ..., q_{L-1}} is the
+    // complement of Ql in Q. Precomputing these here keeps ExtendCiphertext in full RNS
+    // (no multiprecision arithmetic at runtime).
+    /////////////////////////////////////
+    if (compositeDegree > 1 && sizeQ > compositeDegree) {
+        uint32_t sizeQl      = compositeDegree;
+        uint32_t sizeComplQl = sizeQ - sizeQl;
+
+        std::vector<NativeInteger> moduliComplQl(moduliQ.begin() + sizeQl, moduliQ.end());
+        std::vector<NativeInteger> rootsComplQl(rootsQ.begin() + sizeQl, rootsQ.end());
+        m_paramsModRaiseComplQl = std::make_shared<ILDCRTParams<BigInteger>>(GetElementParams()->GetCyclotomicOrder(),
+                                                                             moduliComplQl, rootsComplQl);
+
+        BigInteger modulusQl(1);
+        for (uint32_t i = 0; i < sizeQl; ++i)
+            modulusQl *= BigInteger(moduliQ[i]);
+
+        // Ql/q_i, shared by the QlHatInvModq and QlHatModComplq tables below
+        std::vector<BigInteger> QlHat(sizeQl);
+        for (uint32_t i = 0; i < sizeQl; ++i)
+            QlHat[i] = modulusQl / BigInteger(moduliQ[i]);
+
+        // [(Ql/q_i)^{-1}]_{q_i}
+        m_modRaiseQlHatInvModq.resize(sizeQl);
+        m_modRaiseQlHatInvModqPrecon.resize(sizeQl);
+        for (uint32_t i = 0; i < sizeQl; ++i) {
+            m_modRaiseQlHatInvModq[i]       = QlHat[i].ModInverse(BigInteger(moduliQ[i])).ConvertToInt();
+            m_modRaiseQlHatInvModqPrecon[i] = m_modRaiseQlHatInvModq[i].PrepModMulConst(moduliQ[i]);
+        }
+
+        // [Ql/q_i]_{q_j} and the overflow correction [a*Ql]_{q_j}, 0 <= a <= sizeQl, q_j in ComplQl;
+        // the alpha table is a running sum whose a = 0 row keeps the zero value assign() gives it
+        m_modRaiseQlHatModComplq.assign(sizeComplQl, std::vector<NativeInteger>(sizeQl));
+        m_modRaiseAlphaQlModComplq.assign(sizeQl + 1, std::vector<NativeInteger>(sizeComplQl));
+        for (uint32_t j = 0; j < sizeComplQl; ++j) {
+            BigInteger qj(moduliComplQl[j]);
+            for (uint32_t i = 0; i < sizeQl; ++i)
+                m_modRaiseQlHatModComplq[j][i] = QlHat[i].Mod(qj).ConvertToInt();
+            NativeInteger QlModqj = modulusQl.Mod(qj).ConvertToInt();
+            for (uint32_t a = 1; a <= sizeQl; ++a)
+                m_modRaiseAlphaQlModComplq[a][j] =
+                    m_modRaiseAlphaQlModComplq[a - 1][j].ModAddFast(QlModqj, moduliComplQl[j]);
+        }
+
+        if (m_modqBarrettMu.size() == sizeQ) {
+            // reuse the Barrett constants computed for HYBRID above
+            m_modRaiseModComplqBarrettMu.assign(m_modqBarrettMu.begin() + sizeQl, m_modqBarrettMu.end());
+        }
+        else {
+            m_modRaiseModComplqBarrettMu.resize(sizeComplQl);
+            const auto BarrettBase128Bit(BigInteger(1).LShiftEq(128));
+            for (uint32_t j = 0; j < sizeComplQl; ++j)
+                m_modRaiseModComplqBarrettMu[j] =
+                    (BarrettBase128Bit / BigInteger(moduliComplQl[j])).ConvertToInt<DoubleNativeInt>();
+        }
+
+        // 1./q_i for q_i in Ql (used for the fractional part of the overflow correction)
+        m_modRaiseqInv.resize(sizeQl);
+        for (uint32_t i = 0; i < sizeQl; ++i)
+            m_modRaiseqInv[i] = 1.0 / moduliQ[i].ConvertToDouble();
+    }
+
+    /////////////////////////////////////
+    // Sparse secret encapsulation (SPARSE_ENCAPSULATED): auxiliary basis and tables for the
+    // key switching to/from the sparse secret at the bootstrapping modulus raise
+    // (FHECKKSRNS::KeySwitchGenSparse / KeySwitchSparse). The switching key is generated
+    // over q0*P', where P' = p'_0*p'_1 consists of two primes of MAX_MODULUS_SIZE/2 + 3 bits
+    // each (33 bits, i.e., ~66 auxiliary bits, for the standard 64-bit build). A single
+    // auxiliary prime of at most MAX_MODULUS_SIZE bits (the previous approach) makes the key
+    // switching noise floor(q0*e/P') dominate; with P' exceeding the largest possible q0 by
+    // ~6 bits, it becomes comparable to the modulus switching noise
+    // (see https://github.com/openfheorg/openfhe-development/issues/1041). The tables
+    // below support the exact (HPS-style) CRT basis switch (DCRTPoly::SwitchCRTBasis) used
+    // to scale the key-switched ciphertext back down from q0*P' to q0; the exact method is
+    // used so that no alpha*P' overflow term is dropped during the basis switch.
+    /////////////////////////////////////
+    if (GetSecretKeyDist() == SPARSE_ENCAPSULATED) {
+        constexpr uint32_t sizePSparse = 2;
+        // Two primes of MAX_MODULUS_SIZE/2 + 3 bits each (33 bits for the standard 64-bit
+        // build), so that P' exceeds the largest possible q0 by ~6 bits
+        constexpr uint32_t bitsPSparse = MAX_MODULUS_SIZE / 2 + 3;
+
+        uint32_t n         = GetElementParams()->GetRingDimension();
+        uint64_t primeStep = FindAuxPrimeStep();
+
+        // the auxiliary primes must differ from all moduli in Q and in the hybrid key
+        // switching basis P (a repeated modulus would be registered with a different root
+        // of unity in the NTT tables)
+        std::vector<NativeInteger> moduliToAvoid = moduliQ;
+        if (GetParamsP() != nullptr) {
+            for (const auto& p : GetParamsP()->GetParams())
+                moduliToAvoid.push_back(p->GetModulus());
+        }
+
+        std::vector<NativeInteger> moduliPSparse(sizePSparse);
+        std::vector<NativeInteger> rootsPSparse(sizePSparse);
+        NativeInteger pPrev = FirstPrime<NativeInteger>(bitsPSparse, primeStep);
+        BigInteger modulusPSparse(1);
+        for (uint32_t j = 0; j < sizePSparse; ++j) {
+            bool found = false;
+            do {
+                pPrev = PreviousPrime<NativeInteger>(pPrev, primeStep);
+                found = (std::find(moduliToAvoid.begin(), moduliToAvoid.end(), pPrev) != moduliToAvoid.end());
+            } while (found);
+            moduliPSparse[j] = pPrev;
+            rootsPSparse[j]  = RootOfUnity<NativeInteger>(2 * n, moduliPSparse[j]);
+            modulusPSparse *= BigInteger(moduliPSparse[j]);
+        }
+
+        m_sparseKSParamsP = std::make_shared<ILDCRTParams<BigInteger>>(2 * n, moduliPSparse, rootsPSparse);
+        m_sparseKSParamsQ = std::make_shared<ILDCRTParams<BigInteger>>(2 * n, std::vector<NativeInteger>{moduliQ[0]},
+                                                                       std::vector<NativeInteger>{rootsQ[0]});
+
+        std::vector<NativeInteger> moduliQPSparse{moduliQ[0]};
+        std::vector<NativeInteger> rootsQPSparse{rootsQ[0]};
+        moduliQPSparse.insert(moduliQPSparse.end(), moduliPSparse.begin(), moduliPSparse.end());
+        rootsQPSparse.insert(rootsQPSparse.end(), rootsPSparse.begin(), rootsPSparse.end());
+        m_sparseKSParamsQP = std::make_shared<ILDCRTParams<BigInteger>>(2 * n, moduliQPSparse, rootsQPSparse);
+
+        // Pre-compute CRT::FFT values for P'
+        ChineseRemainderTransformFTT<NativeVector>().PreCompute(rootsPSparse, 2 * n, moduliPSparse);
+
+        BigInteger q0(moduliQ[0]);
+        m_sparseKSPModq    = modulusPSparse.Mod(q0).ConvertToInt();
+        m_sparseKSPInvModq = modulusPSparse.ModInverse(q0).ConvertToInt();
+
+        // [(P'/p'_j)^{-1}]_{p'_j} and [P'/p'_j]_{q_0} ([q_i][p'_j] orientation with a single
+        // q_0 row, as expected by DCRTPoly::SwitchCRTBasis)
+        m_sparseKSPHatInvModp.resize(sizePSparse);
+        m_sparseKSPHatInvModpPrecon.resize(sizePSparse);
+        m_sparseKSPHatModq.assign(1, std::vector<NativeInteger>(sizePSparse));
+        m_sparseKSpInv.resize(sizePSparse);
+        for (uint32_t j = 0; j < sizePSparse; ++j) {
+            BigInteger pj(moduliPSparse[j]);
+            BigInteger PHatj               = modulusPSparse / pj;
+            m_sparseKSPHatInvModp[j]       = PHatj.ModInverse(pj).ConvertToInt();
+            m_sparseKSPHatInvModpPrecon[j] = m_sparseKSPHatInvModp[j].PrepModMulConst(moduliPSparse[j]);
+            m_sparseKSPHatModq[0][j]       = PHatj.Mod(q0).ConvertToInt();
+            m_sparseKSpInv[j]              = 1.0 / moduliPSparse[j].ConvertToDouble();
+        }
+
+        // the overflow correction [a*P']_{q_0}, 0 <= a <= sizePSparse
+        m_sparseKSAlphaPModq.assign(sizePSparse + 1, std::vector<NativeInteger>(1));
+        for (uint32_t a = 0; a <= sizePSparse; ++a)
+            m_sparseKSAlphaPModq[a][0] = m_sparseKSPModq.ModMul(NativeInteger(a), moduliQ[0]);
+
+        // reuse the Barrett constant computed for HYBRID above when available
+        const auto BarrettBase128Bit(BigInteger(1).LShiftEq(128));
+        m_sparseKSModqBarrettMu = {(m_modqBarrettMu.size() > 0) ?
+                                       m_modqBarrettMu[0] :
+                                       (BarrettBase128Bit / q0).ConvertToInt<DoubleNativeInt>()};
     }
 }
 

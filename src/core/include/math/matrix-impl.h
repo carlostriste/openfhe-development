@@ -85,7 +85,7 @@ Matrix<Element> Matrix<Element>::Mult(Matrix<Element> const& other) const {
     }
     Matrix<Element> result(allocZero, rows, other.cols);
     if (rows == 1) {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(result.cols))
         for (size_t col = 0; col < result.cols; ++col) {
             for (size_t i = 0; i < cols; ++i) {
                 result.data[0][col] += data[0][i] * other.data[i][col];
@@ -93,7 +93,7 @@ Matrix<Element> Matrix<Element>::Mult(Matrix<Element> const& other) const {
         }
     }
     else {
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(result.rows))
         for (size_t row = 0; row < result.rows; ++row) {
             for (size_t i = 0; i < cols; ++i) {
                 for (size_t col = 0; col < result.cols; ++col) {
@@ -110,7 +110,7 @@ Matrix<Element>& Matrix<Element>::operator+=(Matrix<Element> const& other) {
     if (rows != other.rows || cols != other.cols) {
         OPENFHE_THROW("Addition operands have incompatible dimensions");
     }
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(cols))
     for (size_t j = 0; j < cols; ++j) {
         for (size_t i = 0; i < rows; ++i) {
             data[i][j] += other.data[i][j];
@@ -124,7 +124,7 @@ Matrix<Element>& Matrix<Element>::operator-=(Matrix<Element> const& other) {
     if (rows != other.rows || cols != other.cols) {
         OPENFHE_THROW("Subtraction operands have incompatible dimensions");
     }
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(cols))
     for (size_t j = 0; j < cols; ++j) {
         for (size_t i = 0; i < rows; ++i) {
             data[i][j] -= other.data[i][j];
@@ -262,13 +262,9 @@ Matrix<Element>& Matrix<Element>::VStack(Matrix<Element> const& other) {
     if (cols != other.cols) {
         OPENFHE_THROW("VStack rows not equal size");
     }
-    for (size_t row = 0; row < other.rows; ++row) {
-        data_row_t rowElems;
-        for (auto elem = other.data[row].begin(); elem != other.data[row].end(); ++elem) {
-            rowElems.push_back(*elem);
-        }
-        data.push_back(std::move(rowElems));
-    }
+    data.reserve(rows + other.rows);
+    for (size_t row = 0; row < other.rows; ++row)
+        data.push_back(other.data[row]);
     rows += other.rows;
     return *this;
 }
@@ -280,10 +276,7 @@ inline Matrix<Element>& Matrix<Element>::HStack(Matrix<Element> const& other) {
         OPENFHE_THROW("HStack cols not equal size");
     }
     for (size_t row = 0; row < rows; ++row) {
-        data_row_t rowElems;
-        for (auto& elem : other.data[row]) {
-            rowElems.push_back(elem);
-        }
+        data_row_t rowElems(other.data[row]);
         MoveAppend(data[row], rowElems);
     }
     cols += other.cols;
@@ -310,7 +303,7 @@ template <class Element>
 Matrix<Element> Matrix<Element>::MultByUnityVector() const {
     Matrix<Element> result(allocZero, rows, 1);
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(result.rows))
     for (size_t row = 0; row < result.rows; ++row) {
         for (size_t col = 0; col < cols; ++col) {
             result.data[row][0] += data[row][col];
@@ -328,7 +321,7 @@ template <class Element>
 Matrix<Element> Matrix<Element>::MultByRandomVector(std::vector<int> ranvec) const {
     Matrix<Element> result(allocZero, rows, 1);
 
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(result.rows))
     for (size_t row = 0; row < result.rows; ++row) {
         for (size_t col = 0; col < cols; ++col) {
             if (ranvec[col] == 1)

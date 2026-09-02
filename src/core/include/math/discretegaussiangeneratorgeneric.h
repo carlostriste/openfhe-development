@@ -273,7 +273,7 @@ public:
    * @param z2 Coefficient for the second sampler
    */
     SamplerCombiner(BaseSampler* s1, BaseSampler* s2, int64_t z1, int64_t z2)
-        : sampler1(s1), sampler2(s1), x1(z1), x2(z2) {}
+        : sampler1(s1), sampler2(s2), x1(z1), x2(z2) {}
     /**
    * @brief Return the combined value for two samplers with given coefficients
    * @return Combined value of the samplers with given coefficents
@@ -308,6 +308,9 @@ public:
    */
     DiscreteGaussianGeneratorGeneric(BaseSampler** samplers, const double std, const int b, double N);
 
+    DiscreteGaussianGeneratorGeneric(const DiscreteGaussianGeneratorGeneric&) = delete;
+    DiscreteGaussianGeneratorGeneric& operator=(const DiscreteGaussianGeneratorGeneric&) = delete;
+
     /**
    * @ brief Returns a generated integer. Uses generic algorithm in UCSD paper,
    * based on Sample Z
@@ -338,7 +341,7 @@ private:
 
     BaseSampler* wide_sampler;
     BaseSampler** base_samplers;
-    BaseSampler* combiners[MAX_LEVELS];
+    std::unique_ptr<SamplerCombiner> combiners[MAX_LEVELS - 1];
     long double wide_variance, sampler_variance;
     double x, c, ci;
     int k, log_base;

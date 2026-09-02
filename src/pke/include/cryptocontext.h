@@ -346,6 +346,14 @@ protected:
         }
     }
 
+    void ValidatePREMode(CALLER_INFO_ARGS_HDR) const {
+        const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersRNS>(m_params);
+        if (cryptoParams == nullptr)
+            OPENFHE_THROW("Invalid crypto parameters: expected CryptoParametersRNS");
+        if (cryptoParams->GetKeySwitchTechnique() == HYBRID && cryptoParams->GetPREMode() == NOT_SET)
+            OPENFHE_THROW("PRE is disabled (default = NOT_SET). Enable with SetPREMode() before generating cryptocontext.");
+    }
+
     void ValidateSeriesPowers(std::shared_ptr<seriesPowers<Element>> powers, CALLER_INFO_ARGS_HDR) const {
         if (powers == nullptr) {
             std::string errorMsg(std::string("The object for powers is nullptr") + CALLER_INFO);
@@ -3132,6 +3140,7 @@ public:
     EvalKey<Element> ReKeyGen(const PrivateKey<Element> oldPrivateKey, const PublicKey<Element> newPublicKey) const {
         ValidateKey(oldPrivateKey);
         ValidateKey(newPublicKey);
+        ValidatePREMode();
         return m_scheme->ReKeyGen(oldPrivateKey, newPublicKey);
     }
 
@@ -3159,6 +3168,7 @@ public:
                                   const PublicKey<Element> publicKey = nullptr) const {
         ValidateCiphertext(ciphertext);
         ValidateKey(evalKey);
+        ValidatePREMode();
         return m_scheme->ReEncrypt(ciphertext, evalKey, publicKey);
     }
 
@@ -3205,6 +3215,7 @@ public:
                                                            const PrivateKey<Element> privateKey) const {
         ValidateKey(privateKey);
         std::vector<Ciphertext<Element>> newCiphertextVec;
+        newCiphertextVec.reserve(ciphertextVec.size());
         for (const auto& ciphertext : ciphertextVec) {
             ValidateCiphertext(ciphertext);
             newCiphertextVec.push_back(m_scheme->MultipartyDecryptLead(ciphertext, privateKey));
@@ -3223,6 +3234,7 @@ public:
                                                            const PrivateKey<Element> privateKey) const {
         ValidateKey(privateKey);
         std::vector<Ciphertext<Element>> newCiphertextVec;
+        newCiphertextVec.reserve(ciphertextVec.size());
         for (const auto& ciphertext : ciphertextVec) {
             ValidateCiphertext(ciphertext);
             newCiphertextVec.push_back(m_scheme->MultipartyDecryptMain(ciphertext, privateKey));

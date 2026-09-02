@@ -39,6 +39,7 @@
 #include "scheme/ckksrns/ckksrns-fhe.h"
 #include "scheme/ckksrns/ckksrns-schemeswitching.h"
 #include "scheme/ckksrns/gen-cryptocontext-ckksrns.h"
+#include "utils/parallel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -211,6 +212,7 @@ void ModSwitch(ConstCiphertext<DCRTPoly> ctxt, Ciphertext<DCRTPoly>& ctxtKS, Nat
         OPENFHE_THROW("ModSwitch is implemented only for ciphertext with one tower.");
 
     std::vector<DCRTPoly> resultElements;
+    resultElements.reserve(ctxt->GetElements().size());
     const auto& paramsQlP = ctxtKS->GetElements()[0].GetParams();
     for (const auto& elem : ctxt->GetElements()) {
         auto& ref = resultElements.emplace_back(paramsQlP, Format::COEFFICIENT, true);
@@ -462,7 +464,7 @@ std::vector<std::vector<std::complex<double>>> EvalLTRectPrecomputeSwitch(
             A_slices[i] = std::vector<std::vector<std::complex<double>>>(A.begin() + i * A[0].size(),
                                                                          A.begin() + (i + 1) * A[0].size());
         }
-#pragma omp parallel for
+#pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(gStep))
         for (uint32_t j = 0; j < gStep; j++) {
             for (uint32_t i = 0; i < bStep; i++) {
                 if (bStep * j + i < n) {
@@ -1252,7 +1254,7 @@ std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> SWITCHCKKSRNS::EvalScheme
 
     // Compute indices for rotations for sparse packing
     if (ringDim > 2 * slots) {  // if the encoding is full, this does not execute
-        indexRotationS2C.reserve(indexRotationS2C.size() + GetMSB(ringDim) - 2 + GetMSB(slots) - 1);
+        indexRotationS2C.reserve(indexRotationS2C.size() + GetMSB(ringDim) - 2 + GetMSB(slots));
         for (uint32_t i = 1; i < ringDim / 2; i <<= 1) {
             indexRotationS2C.emplace_back(static_cast<int32_t>(i));
             if (i <= slots)
