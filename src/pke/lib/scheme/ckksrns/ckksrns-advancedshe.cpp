@@ -1090,7 +1090,7 @@ Ciphertext<DCRTPoly> internalEvalChebyshevSeriesPSWithPrecomp(const std::shared_
 
     // Serialize tree if k*2^{m-1} < 128
     if (k * (1U << (m - 1)) < 128) {
-        Ciphertext<DCRTPoly> aux = T[0]->GetCryptoContext()->EvalSub(InnerEvalChebyshevPS(T[0], f2, k, m, T, T2), T2km1);
+        Ciphertext<DCRTPoly> aux = InnerEvalChebyshevPS(T[0], f2, k, m, T, T2);
         if (!BASELINE) T[0]->GetCryptoContext()->ModReduceInPlace(aux);
         T[0]->GetCryptoContext()->EvalSubInPlace(aux, T2km1);
         return aux;
@@ -1099,7 +1099,7 @@ Ciphertext<DCRTPoly> internalEvalChebyshevSeriesPSWithPrecomp(const std::shared_
 #pragma omp parallel num_threads(OpenFHEParallelControls.GetThreadLimit(6 * m + 2))
     {
 #pragma omp single
-        aux = T[0]->GetCryptoContext()->EvalSub(InnerEvalChebyshevPS(T[0], f2, k, m, T, T2), T2km1);
+        aux = InnerEvalChebyshevPS(T[0], f2, k, m, T, T2);
     }
     if (!BASELINE) T[0]->GetCryptoContext()->ModReduceInPlace(aux);
     T[0]->GetCryptoContext()->EvalSubInPlace(aux, T2km1);
