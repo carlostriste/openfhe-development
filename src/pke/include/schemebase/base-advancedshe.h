@@ -113,10 +113,11 @@ class AdvancedSHEBase {
      *
      * @param ciphertextVec vector of input ciphertexts.
      * @param weights vector containing the weights.
+     * @param target_level the target level, or -1 to use the current level.
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSum(std::vector<ReadOnlyCiphertext<Element>>& ciphertextVec,
-                                               const std::vector<int64_t>& weights) const {
+                                               const std::vector<int64_t>& weights, int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
     /**
@@ -128,7 +129,7 @@ class AdvancedSHEBase {
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSum(std::vector<ReadOnlyCiphertext<Element>>& ciphertextVec,
-                                               const std::vector<double>& weights) const {
+                                               const std::vector<double>& weights, int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
     /**
@@ -140,7 +141,8 @@ class AdvancedSHEBase {
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSum(std::vector<ReadOnlyCiphertext<Element>>& ciphertextVec,
-                                               const std::vector<std::complex<double>>& weights) const {
+                                               const std::vector<std::complex<double>>& weights,
+                                               int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 
@@ -154,7 +156,8 @@ class AdvancedSHEBase {
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
-                                                      const std::vector<int64_t>& weights) const {
+                                                      const std::vector<int64_t>& weights,
+                                                      int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
     /**
@@ -166,7 +169,8 @@ class AdvancedSHEBase {
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
-                                                      const std::vector<double>& weights) const {
+                                                      const std::vector<double>& weights,
+                                                      int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
     /**
@@ -178,7 +182,8 @@ class AdvancedSHEBase {
      * @return A ciphertext containing the linear weighted sum.
      */
     virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
-                                                      const std::vector<std::complex<double>>& weights) const {
+                                                      const std::vector<std::complex<double>>& weights,
+                                                      int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 

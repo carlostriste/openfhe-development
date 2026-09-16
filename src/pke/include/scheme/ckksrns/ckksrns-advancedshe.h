@@ -61,50 +61,64 @@ class AdvancedSHECKKSRNS : public AdvancedSHERNS {
     //------------------------------------------------------------------------------
 
     Ciphertext<DCRTPoly> EvalLinearWSum(std::vector<ReadOnlyCiphertext<DCRTPoly>>& ciphertexts,
-                                        const std::vector<int64_t>& constants) const override;
+                                        const std::vector<int64_t>& constants,
+                                        int32_t target_level = -1) const override;
     /**
      * Computes the linear weighted sum of ciphertexts with real constants, leaving the inputs unchanged; the
      * products are accumulated and the sum is rescaled once at the end.
      *
      * @param ciphertexts the input ciphertexts
      * @param constants the real weights, one per ciphertext
+     * @param target_level the target level, or -1 to use the current level.
      * @return the weighted sum
      */
     Ciphertext<DCRTPoly> EvalLinearWSum(std::vector<ReadOnlyCiphertext<DCRTPoly>>& ciphertexts,
-                                        const std::vector<double>& constants) const override;
+                                        const std::vector<double>& constants, int32_t target_level = -1) const override;
     /**
      * Computes the linear weighted sum of ciphertexts with complex constants, leaving the inputs unchanged; the
      * products are accumulated and the sum is rescaled once at the end.
      *
      * @param ciphertexts the input ciphertexts
      * @param constants the complex weights, one per ciphertext
+     * @param target_level the target level, or -1 to use the current level.
      * @return the weighted sum
      */
     Ciphertext<DCRTPoly> EvalLinearWSum(std::vector<ReadOnlyCiphertext<DCRTPoly>>& ciphertexts,
-                                        const std::vector<std::complex<double>>& constants) const override;
+                                        const std::vector<std::complex<double>>& constants,
+                                        int32_t target_level = -1) const override;
 
     Ciphertext<DCRTPoly> EvalLinearWSumMutable(std::vector<Ciphertext<DCRTPoly>>& ciphertexts,
-                                               const std::vector<int64_t>& constants) const override;
+                                               const std::vector<int64_t>& constants,
+                                               int32_t target_level = -1) const override;
     /**
      * Computes the linear weighted sum of ciphertexts with real constants; the inputs are first brought to the
      * same level and noise scale degree (they are modified) and the sum is rescaled once at the end.
      *
      * @param ciphertexts the input ciphertexts
      * @param constants the real weights, one per ciphertext
+     * @param target_level the target level, or -1 to use the current level.
      * @return the weighted sum
      */
     Ciphertext<DCRTPoly> EvalLinearWSumMutable(std::vector<Ciphertext<DCRTPoly>>& ciphertexts,
-                                               const std::vector<double>& constants) const override;
+                                               const std::vector<double>& constants,
+                                               int32_t target_level = -1) const override;
     /**
      * Computes the linear weighted sum of ciphertexts with complex constants; the inputs are first brought to the
      * same level and noise scale degree (they are modified) and the sum is rescaled once at the end.
      *
      * @param ciphertexts the input ciphertexts
      * @param constants the complex weights, one per ciphertext
+     * @param target_level the target level, or -1 to use the current level.
      * @return the weighted sum
      */
     Ciphertext<DCRTPoly> EvalLinearWSumMutable(std::vector<Ciphertext<DCRTPoly>>& ciphertexts,
-                                               const std::vector<std::complex<double>>& constants) const override;
+                                               const std::vector<std::complex<double>>& constants,
+                                               int32_t target_level = -1) const override;
+
+    static Ciphertext<DCRTPoly> EvalPartialLinearWSumWithBias_(const std::vector<Ciphertext<DCRTPoly>>& ciphertexts,
+                                                               const std::vector<double>& constants, double bias,
+                                                               uint32_t limit = 0, int32_t target_level = -1,
+                                                               bool rescale = true);
 
     //------------------------------------------------------------------------------
     // EVAL POLYNOMIAL

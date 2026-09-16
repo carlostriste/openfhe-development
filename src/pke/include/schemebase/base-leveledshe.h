@@ -579,9 +579,11 @@ class LeveledSHEBase {
      *
      * @param ciphertext the input ciphertext.
      * @param scalar the real constant.
+     * @param target_level the target level, or -1 to use the current level.
      * @return the new ciphertext.
      */
-    virtual Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, double scalar) const {
+    virtual Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, double scalar,
+                                         int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 
@@ -590,8 +592,9 @@ class LeveledSHEBase {
      *
      * @param ciphertext the input/output ciphertext.
      * @param scalar the real constant.
+     * @param target_level the target level, or -1 to use the current level.
      */
-    virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, double scalar) const {
+    virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, double scalar, int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 
@@ -602,9 +605,11 @@ class LeveledSHEBase {
      *
      * @param ciphertext the input ciphertext.
      * @param scalar the complex constant.
+     * @param target_level the target level, or -1 to use the current level.
      * @return the new ciphertext.
      */
-    virtual Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, std::complex<double> scalar) const {
+    virtual Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, std::complex<double> scalar,
+                                         int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 
@@ -613,8 +618,10 @@ class LeveledSHEBase {
      *
      * @param ciphertext the input/output ciphertext.
      * @param scalar the complex constant.
+     * @param target_level the target level, or -1 to use the current level.
      */
-    virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, std::complex<double> scalar) const {
+    virtual void EvalMultInPlace(Ciphertext<Element>& ciphertext, std::complex<double> scalar,
+                                 int32_t target_level = -1) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 
