@@ -2292,7 +2292,7 @@ class CryptoContextImpl : public Serializable {
     Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, double scalar, int32_t target_level = -1) const {
         if (!ciphertext)
             OPENFHE_THROW("Input ciphertext is nullptr");
-        return m_scheme->EvalMult(ciphertext, scalar);
+        return m_scheme->EvalMult(ciphertext, scalar, target_level);
     }
 
     /**
@@ -2313,11 +2313,12 @@ class CryptoContextImpl : public Serializable {
      *
      * @param ciphertext  Ciphertext to modify.
      * @param scalar      Real number multiplicand.
+     * @param target_level
      */
-    void EvalMultInPlace(Ciphertext<Element>& ciphertext, double scalar) const {
+    void EvalMultInPlace(Ciphertext<Element>& ciphertext, double scalar, int32_t target_level = -1) const {
         if (!ciphertext)
             OPENFHE_THROW("Input ciphertext is nullptr");
-        m_scheme->EvalMultInPlace(ciphertext, scalar);
+        m_scheme->EvalMultInPlace(ciphertext, scalar, target_level);
     }
 
     /**
@@ -2343,7 +2344,7 @@ class CryptoContextImpl : public Serializable {
                                  int32_t target_level = -1) const {
         if (!ciphertext)
             OPENFHE_THROW("Input ciphertext is nullptr");
-        return m_scheme->EvalMult(ciphertext, scalar);
+        return m_scheme->EvalMult(ciphertext, scalar, target_level);
     }
 
     /**
@@ -2368,7 +2369,7 @@ class CryptoContextImpl : public Serializable {
                          int32_t target_level = -1) const {
         if (!ciphertext)
             OPENFHE_THROW("Input ciphertext is nullptr");
-        m_scheme->EvalMultInPlace(ciphertext, scalar);
+        m_scheme->EvalMultInPlace(ciphertext, scalar, target_level);
     }
 
     /**
@@ -2819,8 +2820,9 @@ class CryptoContextImpl : public Serializable {
      */
     template <typename VectorDataType = double>
     Ciphertext<Element> EvalLinearWSum(std::vector<ReadOnlyCiphertext<Element>>& ciphertextVec,
-                                       const std::vector<VectorDataType>& constantVec) const {
-        return m_scheme->EvalLinearWSum(ciphertextVec, constantVec);
+                                       const std::vector<VectorDataType>& constantVec,
+                                       int32_t target_level = -1) const {
+        return m_scheme->EvalLinearWSum(ciphertextVec, constantVec, target_level);
     }
 
     /**
@@ -2845,8 +2847,9 @@ class CryptoContextImpl : public Serializable {
      */
     template <typename VectorDataType = double>
     Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,
-                                              const std::vector<VectorDataType>& constantsVec) const {
-        return m_scheme->EvalLinearWSumMutable(ciphertextVec, constantsVec);
+                                              const std::vector<VectorDataType>& constantsVec,
+                                              int32_t target_level = -1) const {
+        return m_scheme->EvalLinearWSumMutable(ciphertextVec, constantsVec, target_level);
     }
 
     /**
@@ -2858,8 +2861,9 @@ class CryptoContextImpl : public Serializable {
      */
     template <typename VectorDataType = double>
     Ciphertext<Element> EvalLinearWSumMutable(const std::vector<VectorDataType>& constantsVec,
-                                              std::vector<Ciphertext<Element>>& ciphertextVec) const {
-        return EvalLinearWSumMutable(ciphertextVec, constantsVec);
+                                              std::vector<Ciphertext<Element>>& ciphertextVec,
+                                              int32_t target_level = -1) const {
+        return EvalLinearWSumMutable(ciphertextVec, constantsVec, target_level);
     }
 
     //------------------------------------------------------------------------------

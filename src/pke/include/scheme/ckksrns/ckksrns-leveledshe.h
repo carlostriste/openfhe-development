@@ -164,17 +164,20 @@ class LeveledSHECKKSRNS : public LeveledSHERNS {
      *
      * @param ciphertext the input ciphertext
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      * @return the product
      */
-    Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext, double operand) const override;
+    Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext, double operand,
+                                  int32_t target_level = -1) const override;
 
     /**
      * Multiplies a ciphertext by a real constant in place (see EvalMult).
      *
      * @param ciphertext the input ciphertext, replaced by the product
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      */
-    void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const override;
+    void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand, int32_t target_level = -1) const override;
 
     /**
      * Multiplies a ciphertext by a plaintext in place and updates the scaling factor of the product: for the
@@ -194,17 +197,21 @@ class LeveledSHECKKSRNS : public LeveledSHERNS {
      *
      * @param ciphertext the input ciphertext
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      * @return the product
      */
-    Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const override;
+    Ciphertext<DCRTPoly> EvalMult(ConstCiphertext<DCRTPoly>& ciphertext, std::complex<double> operand,
+                                  int32_t target_level = -1) const override;
 
     /**
      * Multiplies a ciphertext by a complex constant in place (see EvalMult).
      *
      * @param ciphertext the input ciphertext, replaced by the product
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      */
-    void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const override;
+    void EvalMultInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand,
+                         int32_t target_level = -1) const override;
 
     /**
      * Multiplies a ciphertext by an unscaled integer: the ciphertext elements are multiplied by the integer directly,
@@ -298,16 +305,19 @@ class LeveledSHECKKSRNS : public LeveledSHERNS {
      *
      * @param ciphertext the input ciphertext, replaced by the product
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      */
-    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand) const;
+    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, double operand, int32_t target_level = -1) const;
 
     /**
      * Core of the multiplication by a complex constant (see the real overload).
      *
      * @param ciphertext the input ciphertext, replaced by the product
      * @param operand the constant to multiply by
+     * @param target_level the target level, or -1 to use the current level.
      */
-    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand) const;
+    void EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand,
+                             int32_t target_level = -1) const;
 
     /**
      * Brings two ciphertexts to the same level and noise scale degree before a binary operation. For FIXEDMANUAL
@@ -351,9 +361,11 @@ class LeveledSHECKKSRNS : public LeveledSHERNS {
      *
      * @param ciphertext the ciphertext the constant will multiply (provides the level and moduli)
      * @param operand the constant
+     * @param scaling_factor the scaling factor to scale the constant by, or -1 to use the level's scaling factor
      * @return the CRT representation of the scaled constant, one residue per tower
      */
-    std::vector<DCRTPoly::Integer> GetElementForEvalMult(ConstCiphertext<DCRTPoly>& ciphertext, double operand) const;
+    std::vector<DCRTPoly::Integer> GetElementForEvalMult(ConstCiphertext<DCRTPoly>& ciphertext, double operand,
+                                                         double scaling_factor = -1.0) const;
 
     /////////////////////////////////////
     // SERIALIZATION
