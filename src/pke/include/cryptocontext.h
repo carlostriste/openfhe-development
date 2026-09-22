@@ -1725,6 +1725,8 @@ public:
     */
     void EvalSubInPlace(Ciphertext<Element>& ciphertext1, ConstCiphertext<Element>& ciphertext2) const {
         TypeCheck(ciphertext1, ciphertext2);
+
+
         m_scheme->EvalSubInPlace(ciphertext1, ciphertext2);
     }
 
@@ -2206,6 +2208,8 @@ public:
     *
     * @param ciphertext  Multiplier.
     * @param scalar      Real number multiplicand.
+    * @param target_level
+    * @param target_level
     * @return Resulting ciphertext.
     */
     Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, double scalar, int32_t target_level = -1) const {
@@ -2219,6 +2223,8 @@ public:
     *
     * @param scalar      Real number multiplier.
     * @param ciphertext  Multiplicand.
+    * @param target_level
+    * @param target_level
     * @return Resulting ciphertext.
     */
     inline Ciphertext<Element> EvalMult(double scalar, ConstCiphertext<Element>& ciphertext,
@@ -2244,6 +2250,8 @@ public:
     *
     * @param scalar      Real number multiplier.
     * @param ciphertext  Ciphertext to modify (multiplicand).
+    * @param target_level
+    * @param target_level
     */
     inline void EvalMultInPlace(double scalar, Ciphertext<Element>& ciphertext, int32_t target_level = -1) const {
         EvalMultInPlace(ciphertext, scalar, target_level);
@@ -2254,6 +2262,8 @@ public:
     *
     * @param ciphertext  Multiplier.
     * @param scalar      Complex number multiplicand.
+    * @param target_level
+    * @param target_level
     * @return Resulting ciphertext.
     */
     Ciphertext<Element> EvalMult(ConstCiphertext<Element>& ciphertext, std::complex<double> scalar,
@@ -2279,6 +2289,8 @@ public:
     *
     * @param ciphertext  Ciphertext to modify.
     * @param scalar      Complex number multiplicand.
+    * @param target_level
+    * @param target_level
     */
     void EvalMultInPlace(Ciphertext<Element>& ciphertext, std::complex<double> scalar,
                          int32_t target_level = -1) const {
@@ -2730,6 +2742,7 @@ public:
     *
     * @param ciphertextVec  List of ciphertexts.
     * @param constantVec    Corresponding weights.
+    * @param target_level
     * @return Weighted sum as a ciphertext.
     */
     template <typename VectorDataType = double>
@@ -2757,6 +2770,7 @@ public:
     *
     * @param ciphertextVec  List of mutable ciphertexts.
     * @param constantsVec   Corresponding weights.
+    * @param target_level
     * @return Weighted sum as a ciphertext.
     */
     template <typename VectorDataType = double>
@@ -2771,6 +2785,8 @@ public:
     *
     * @param constantsVec   Corresponding weights.
     * @param ciphertextVec  List of mutable ciphertexts.
+    * @param target_level
+    * @param target_level
     * @return Weighted sum as a ciphertext.
     */
     template <typename VectorDataType = double>
@@ -3597,8 +3613,8 @@ public:
     */
     void EvalBootstrapSetup(std::vector<uint32_t> levelBudget = {5, 4}, std::vector<uint32_t> dim1 = {0, 0},
                             uint32_t slots = 0, uint32_t correctionFactor = 0, bool precompute = true,
-                            bool BTSlotsEncoding = false) {
-        m_scheme->EvalBootstrapSetup(*this, levelBudget, dim1, slots, correctionFactor, precompute, BTSlotsEncoding);
+                            bool BTSlotsEncoding = false, int32_t modevallevels = -1) {
+        m_scheme->EvalBootstrapSetup(*this, levelBudget, dim1, slots, correctionFactor, precompute, BTSlotsEncoding, modevallevels);
     }
 
     /**

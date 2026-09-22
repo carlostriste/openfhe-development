@@ -130,6 +130,7 @@ public:
    *
    * @param ciphertexts vector of input ciphertexts.
    * @param constants vector containing double weights.
+   * @param target_level
    * @return A ciphertext containing the linear weighted sum.
    */
     virtual Ciphertext<Element> EvalLinearWSumMutable(std::vector<Ciphertext<Element>>& ciphertextVec,

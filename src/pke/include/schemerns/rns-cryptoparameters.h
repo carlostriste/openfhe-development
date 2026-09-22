@@ -1410,7 +1410,7 @@ protected:
     /////////////////////////////////////
     // BGVrns ModReduce
     /////////////////////////////////////
-
+public:
     // Stores NTL precomputations for [t]_{q_i}
     std::vector<NativeInteger> m_tModqPrecon;
 
