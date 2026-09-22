@@ -177,7 +177,7 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalHornerGiantRotate(ConstCiphertext<DCRTPoly>
 
 void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
                                     std::vector<uint32_t> dim1, uint32_t numSlots, uint32_t correctionFactor,
-                                    bool precompute, bool BTSlotsEncoding) {
+                                    bool precompute, bool BTSlotsEncoding, uint32_t modevallevels) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
 
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
@@ -307,8 +307,10 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         if (precom->BTSlotsEncoding) {
             lDec = (2 + (st == FLEXIBLEAUTOEXT)) * compositeDegree;
         } else {
-            uint32_t depthBT = GetModDepthInternal(cryptoParams->GetSecretKeyDist()) + precom->m_paramsEnc.lvlb +
-                               precom->m_paramsDec.lvlb;
+            uint32_t approxModDepth = modevallevels == std::numeric_limits<uint32_t>::max() ?
+                                              GetModDepthInternal(cryptoParams->GetSecretKeyDist()) :
+                                              modevallevels;
+            uint32_t depthBT = approxModDepth + precom->m_paramsEnc.lvlb + precom->m_paramsDec.lvlb;
             lDec = L0 - compositeDegree * depthBT;
         }
 
@@ -2097,8 +2099,7 @@ std::vector<ReadOnlyPlaintext> FHECKKSRNS::EvalLinearTransformPrecompute(
         auto diag = ExtractShiftedDiagonal(A, ji);
         for (auto& d : diag)
             d *= scale;
-        result[ji] =
-                MakeAuxPlaintext(cc, elementParamsPtr, Rotate(diag, -step * (ji / step)), 1, towersToDrop, diag.size());
+        result[ji] = MakeAuxPlaintext(cc, elementParamsPtr, Rotate(diag, -step * (ji / step)), 1, towersToDrop, slots);
     }
     return result;
 }
@@ -2151,7 +2152,7 @@ std::vector<ReadOnlyPlaintext> FHECKKSRNS::EvalLinearTransformPrecompute(
             for (auto& v : vecA)
                 v *= scale;
             result[ji] = MakeAuxPlaintext(cc, elementParamsPtr, Rotate(vecA, -step * (ji / step)), 1, towersToDrop,
-                                          vecA.size());
+                                          2 * slots);
         }
     } else {
         // horizontal concatenation - used during homomorphic decoding
@@ -2174,7 +2175,7 @@ std::vector<ReadOnlyPlaintext> FHECKKSRNS::EvalLinearTransformPrecompute(
             for (auto& v : vec)
                 v *= scale;
             result[ji] = MakeAuxPlaintext(cc, elementParamsPtr, Rotate(vec, -step * (ji / step)), 1, towersToDrop,
-                                          vec.size());
+                                          2 * slots);
         }
     }
 
@@ -2244,6 +2245,31 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
     // running accumulated correction; plaintexts pre-absorb the per-level Aut_{-delta_s}
     int32_t runningAcc = 0;
 
+    // Determine the actual number of slots: the smallest power-of-two
+    // length for which the plaintext is a repeating pattern. All diagonals
+    // are expected to share the same actual slot count, so inspect the
+    // first diagonal and use that value for all.
+    auto computeActualSlots = [](const std::vector<std::complex<double>>& v) -> int32_t {
+        const double eps = 1e-12;
+        size_t n = v.size();
+        size_t k = 1;
+        while (k <= n) {
+            if (n % k == 0) {
+                bool ok = true;
+                for (size_t i = 0; i < n; ++i) {
+                    if (std::abs(v[i] - v[i % k]) > eps) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok)
+                    return static_cast<int32_t>(k);
+            }
+            k <<= 1;
+        }
+        return static_cast<int32_t>(n);
+    };
+
     if (uint32_t M4 = M / 4; slots == M4 || flagStCComplex) {
         //------------------------------------------------------------------------------
         // fully-packed mode
@@ -2255,6 +2281,13 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
             const int32_t shiftScale = 1 << ((s - flagRem) * p.layersCollapse + p.remCollapse);
             const int32_t rotScale = shiftScale * static_cast<int32_t>(p.g);
             const uint32_t limit = p.b * p.g;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto& firstDiag = coeff[s][0];
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2267,9 +2300,9 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
 
                     auto rot = Rotate(coeff[s][ij],
                                       ReduceRotation(-rotScale * (ij / p.g) + offset * shiftScale + runningAcc, slots));
-
+                    rot.resize(actualSlots);
                     result[s][ij] = MakeAuxPlaintext(cc, paramsVector[s - stop], rot, 1, level0 - compositeDegree * s,
-                                                     rot.size());
+                                                     actualSlots);
                 }
             }
             runningAcc += offset * shiftScale;
@@ -2277,6 +2310,13 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
 
         if (flagRem == 1) {
             const uint32_t limit = p.bRem * p.gRem;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto& firstDiag = coeff[stop][0];
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2288,8 +2328,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                     auto rot = Rotate(coeff[stop][ij], ReduceRotation(-static_cast<int32_t>(p.gRem) * (ij / p.gRem) +
                                                                               offsetRem + runningAcc,
                                                                       slots));
-
-                    result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, rot.size());
+                    rot.resize(actualSlots);
+                    result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, actualSlots);
                 }
             }
         }
@@ -2305,6 +2345,16 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
             const int32_t shiftScale = 1 << ((s - flagRem) * p.layersCollapse + p.remCollapse);
             const int32_t rotScale = shiftScale * static_cast<int32_t>(p.g);
             const uint32_t limit = p.b * p.g;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto clearTmp = coeff[s][0];
+                auto& clearTmpi = coeffi[s][0];
+                clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
+                auto& firstDiag = clearTmp;
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2312,7 +2362,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                 if (ij != p.numRotations) {
                     // concatenate the coefficients horizontally on their third dimension, which corresponds to the # of slots
                     auto clearTmp = coeff[s][ij];
-                    auto& clearTmpi = coeffi[s][ij];
+                    auto clearTmpi = coeffi[s][ij];
+
                     clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
                     if ((flagRem == 0) && (s == stop + 1)) {
                         for (auto& c : clearTmp)
@@ -2322,9 +2373,9 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                     auto rot = Rotate(
                             clearTmp,
                             ReduceRotation(-rotScale * (ij / p.g) + offset * shiftScale + runningAcc, 2 * slots));
-
+                    rot.resize(actualSlots);
                     result[s][ij] = MakeAuxPlaintext(cc, paramsVector[s - stop], rot, 1, level0 - compositeDegree * s,
-                                                     rot.size());
+                                                     actualSlots);
                 }
             }
             runningAcc += offset * shiftScale;
@@ -2332,6 +2383,16 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
 
         if (flagRem == 1) {
             const uint32_t limit = p.bRem * p.gRem;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto clearTmp = coeff[stop][0];
+                auto& clearTmpi = coeffi[stop][0];
+                clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
+                auto& firstDiag = clearTmp;
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2339,15 +2400,16 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalCoeffsToSlotsPrecomp
                 if (ij != p.numRotationsRem) {
                     // concatenate the coefficients on their third dimension, which corresponds to the # of slots
                     auto clearTmp = coeff[stop][ij];
-                    auto& clearTmpi = coeffi[stop][ij];
+                    auto clearTmpi = coeffi[stop][ij];
+
                     clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
                     for (auto& c : clearTmp)
                         c *= scale;
 
                     auto rot = Rotate(clearTmp,
                                       ReduceRotation(-p.gRem * (ij / p.gRem) + offsetRem + runningAcc, 2 * slots));
-
-                    result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, rot.size());
+                    rot.resize(actualSlots);
+                    result[stop][ij] = MakeAuxPlaintext(cc, paramsVector[0], rot, 1, level0, actualSlots);
                 }
             }
         }
@@ -2413,6 +2475,31 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
     // CtS output now carries no extra rotation (absorbed into CtS precompute), so start at 0
     int32_t runningAcc = 0;
 
+    // Determine the actual number of slots: the smallest power-of-two
+    // length for which the plaintext is a repeating pattern. All diagonals
+    // are expected to share the same actual slot count, so inspect the
+    // first diagonal and use that value for all.
+    auto computeActualSlots = [](const std::vector<std::complex<double>>& v) -> int32_t {
+        const double eps = 1e-12;
+        size_t n = v.size();
+        size_t k = 1;
+        while (k <= n) {
+            if (n % k == 0) {
+                bool ok = true;
+                for (size_t i = 0; i < n; ++i) {
+                    if (std::abs(v[i] - v[i % k]) > eps) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok)
+                    return static_cast<int32_t>(k);
+            }
+            k <<= 1;
+        }
+        return static_cast<int32_t>(n);
+    };
+
     if (uint32_t M4 = cc.GetCyclotomicOrder() / 4; M4 == slots || flagStCComplex) {
         auto coeff = CoeffDecodingCollapse(A, rotGroup, p.lvlb, flag_i);
 
@@ -2421,6 +2508,13 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
             const int32_t shiftScale = 1 << (s * p.layersCollapse);
             const int32_t rotScale = shiftScale * static_cast<int32_t>(p.g);
             const uint32_t limit = p.b * p.g;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto& firstDiag = coeff[s][0];
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2433,9 +2527,9 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
 
                     auto rot = Rotate(coeff[s][ij],
                                       ReduceRotation(-rotScale * (ij / p.g) + offset * shiftScale + runningAcc, slots));
-
+                    rot.resize(actualSlots);
                     result[s][ij] = MakeAuxPlaintext(cc, paramsVector[s], rot, 1, towersToDrop + compositeDegree * s,
-                                                     rot.size());
+                                                     actualSlots);
                 }
             }
             runningAcc += offset * shiftScale;
@@ -2445,6 +2539,13 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
             const int32_t shiftScaleRem = 1 << (smax * p.layersCollapse);
             const int32_t rotScale = shiftScaleRem * static_cast<int32_t>(p.gRem);
             const uint32_t limit = p.bRem * p.gRem;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto& firstDiag = coeff[smax][0];
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2456,9 +2557,10 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                     auto rot = Rotate(
                             coeff[smax][ij],
                             ReduceRotation(-rotScale * (ij / p.gRem) + offsetRem * shiftScaleRem + runningAcc, slots));
+                    rot.resize(actualSlots);
 
                     result[smax][ij] = MakeAuxPlaintext(cc, paramsVector[smax], rot, 1,
-                                                        towersToDrop + compositeDegree * smax, rot.size());
+                                                        towersToDrop + compositeDegree * smax, actualSlots);
                 }
             }
         }
@@ -2475,6 +2577,16 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
             const int32_t shiftScale = 1 << (s * p.layersCollapse);
             const int32_t rotScale = shiftScale * static_cast<int32_t>(p.g);
             const uint32_t limit = p.b * p.g;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto clearTmp = coeff[s][0];
+                auto& clearTmpi = coeffi[s][0];
+                clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
+                auto& firstDiag = clearTmp;
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2493,9 +2605,9 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                     auto rot = Rotate(
                             clearTmp,
                             ReduceRotation(-rotScale * (ij / p.g) + offset * shiftScale + runningAcc, 2 * slots));
-
+                    rot.resize(actualSlots);
                     result[s][ij] = MakeAuxPlaintext(cc, paramsVector[s], rot, 1, towersToDrop + compositeDegree * s,
-                                                     rot.size());
+                                                     actualSlots);
                 }
             }
             runningAcc += offset * shiftScale;
@@ -2505,6 +2617,16 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
             const int32_t shiftScaleRem = 1 << (smax * p.layersCollapse);
             const int32_t rotScale = shiftScaleRem * static_cast<int32_t>(p.gRem);
             const uint32_t limit = p.bRem * p.gRem;
+
+            int32_t actualSlots = static_cast<int32_t>(slots);
+            if (slots > 0) {
+                auto clearTmp = coeff[smax][0];
+                auto& clearTmpi = coeffi[smax][0];
+                clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
+                auto& firstDiag = clearTmp;
+                actualSlots = computeActualSlots(firstDiag);
+            }
+
 #if !defined(__MINGW32__) && !defined(__MINGW64__)
     #pragma omp parallel for num_threads(OpenFHEParallelControls.GetThreadLimit(limit))
 #endif
@@ -2512,7 +2634,8 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                 if (ij != p.numRotationsRem) {
                     // concatenate the coefficients on their third dimension, which corresponds to the # of slots
                     auto clearTmp = coeff[smax][ij];
-                    auto& clearTmpi = coeffi[smax][ij];
+                    auto clearTmpi = coeffi[smax][ij];
+
                     clearTmp.insert(clearTmp.end(), clearTmpi.begin(), clearTmpi.end());
                     for (auto& c : clearTmp)
                         c *= scale;
@@ -2520,9 +2643,10 @@ std::vector<std::vector<ReadOnlyPlaintext>> FHECKKSRNS::EvalSlotsToCoeffsPrecomp
                     auto rot = Rotate(clearTmp,
                                       ReduceRotation(-rotScale * (ij / p.gRem) + offsetRem * shiftScaleRem + runningAcc,
                                                      2 * slots));
+                    rot.resize(actualSlots);  // ensure the vector is the correct size for MakeAuxPlaintext
 
                     result[smax][ij] = MakeAuxPlaintext(cc, paramsVector[smax], rot, 1,
-                                                        towersToDrop + compositeDegree * smax, rot.size());
+                                                        towersToDrop + compositeDegree * smax, actualSlots);
                 }
             }
         }

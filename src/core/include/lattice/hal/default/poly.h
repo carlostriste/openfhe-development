@@ -622,8 +622,12 @@ class PolyImpl final : public PolyInterface<PolyImpl<VecType>, VecType, PolyImpl
 
   protected:
     Format m_format{Format::EVALUATION};
+
+  public:
     std::shared_ptr<Params> m_params{nullptr};
     std::unique_ptr<VecType> m_values{nullptr};
+
+  protected:
     /**
      * @brief Switches the format of an element over an arbitrary (non-power-of-two) cyclotomic ring with the
      * Bluestein-based transform, using the root of unity, big modulus and big root of unity of the parameters;

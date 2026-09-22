@@ -154,12 +154,14 @@ using namespace std::literals::complex_literals;
  */
 class FHECKKSRNS : public FHERNS {
   private:
+  public:
     // correction factor, which we scale the message by to improve precision
     uint32_t m_correctionFactor;
 
     // key tuple is dim1, levelBudgetEnc, levelBudgetDec
     std::map<uint32_t, std::shared_ptr<CKKSBootstrapPrecom>> m_bootPrecomMap;
 
+  private:
     using ParmType = typename DCRTPoly::Params;
     using DugType = typename DCRTPoly::DugType;
     using DggType = typename DCRTPoly::DggType;
@@ -197,7 +199,8 @@ class FHECKKSRNS : public FHERNS {
      */
     void EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::vector<uint32_t> levelBudget,
                             std::vector<uint32_t> dim1, uint32_t slots, uint32_t correctionFactor, bool precompute,
-                            bool BTSlotsEncoding) override;
+                            bool BTSlotsEncoding,
+                            uint32_t modevallevels = std::numeric_limits<uint32_t>::max()) override;
 
     std::shared_ptr<std::map<uint32_t, EvalKey<DCRTPoly>>> EvalBootstrapKeyGen(const PrivateKey<DCRTPoly> privateKey,
                                                                                uint32_t slots) override;
@@ -1025,8 +1028,10 @@ class FHECKKSRNS : public FHERNS {
     //------------------------------------------------------------------------------
     // Find Rotation Indices
     //------------------------------------------------------------------------------
+  public:
     std::vector<int32_t> FindBootstrapRotationIndices(uint32_t slots, uint32_t M);
 
+  private:
     // ATTN: The following 3 functions are helper methods to be called in FindBootstrapRotationIndices() only.
     // so they DO NOT remove possible duplicates and automorphisms corresponding to 0 and M/4.
     // These methods completely depend on FindBootstrapRotationIndices() to do that.
@@ -1047,7 +1052,6 @@ class FHECKKSRNS : public FHERNS {
 
     void ExtendCiphertext(std::vector<DCRTPoly>& ciphertext, const CryptoContextImpl<DCRTPoly>& cc,
                           const std::shared_ptr<DCRTPoly::Params> params) const;
-
     /**
      * Raises the modulus of a depleted ciphertext (bottom level, noise degree 1) to the raised basis, i.e.,
      * extends its bottom RNS limbs (a single prime, or compositeDegree primes for composite scaling) to
@@ -1057,6 +1061,7 @@ class FHECKKSRNS : public FHERNS {
     void ModRaiseInPlace(Ciphertext<DCRTPoly>& raised,
                          const std::shared_ptr<DCRTPoly::Params>& elementParamsRaisedPtr) const;
 
+  public:
     void ApplyDoubleAngleIterations(Ciphertext<DCRTPoly>& ciphertext, uint32_t numIt) const;
 
     /**
@@ -1128,11 +1133,10 @@ class FHECKKSRNS : public FHERNS {
 
     // upper bounds for the number of overflows in the sparse secret cases; the failure probability depends only on
     // K and on the Hamming weight h of the sparse secret (equation (1) of https://eprint.iacr.org/2022/024)
-
-    // SPARSE_TERNARY (h = 192): failure probability of about 2^{-39} per coefficient, i.e., 2^{-22} for 2^16 slots.
-    // Also used for SPARSE_ENCAPSULATED with the denser sparse secret (h = 64: first modulus above 60 bits), where
-    // the failure probability is below 2^{-142} for 2^16 slots.
+  public:
+    // TODO: unify this
     static constexpr uint32_t K_SPARSE = 28;
+    static constexpr uint32_t K_SPARSE_ALT = 25;
     // SPARSE_ENCAPSULATED (h = 32): failure probability below 2^{-137} for 2^16 slots
     static constexpr uint32_t K_SPARSE_ENCAPSULATED = 16;
 
