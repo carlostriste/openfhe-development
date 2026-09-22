@@ -382,7 +382,7 @@ class ILDCRTParams final : public ElemParams<IntType> {
         return out << std::endl;
     }
 
-  private:
+  public:
     // array of smaller ILParams
     std::vector<std::shared_ptr<ILNativeParams>> m_params;
 };

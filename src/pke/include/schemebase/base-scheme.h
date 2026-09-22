@@ -1465,9 +1465,11 @@ class SchemeBase {
 
     void EvalBootstrapSetup(const CryptoContextImpl<Element>& cc, const std::vector<uint32_t>& levelBudget = {5, 4},
                             const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0,
-                            uint32_t correctionFactor = 0, bool precompute = true, bool BTSlotsEncoding = false) {
+                            uint32_t correctionFactor = 0, bool precompute = true, bool BTSlotsEncoding = false,
+                            int32_t modevallevels = -1) {
         VerifyFHEEnabled(__func__);
-        m_FHE->EvalBootstrapSetup(cc, levelBudget, dim1, slots, correctionFactor, precompute, BTSlotsEncoding);
+        m_FHE->EvalBootstrapSetup(cc, levelBudget, dim1, slots, correctionFactor, precompute, BTSlotsEncoding,
+                                  modevallevels);
     }
 
     // Cache teardown is best-effort and must stay noexcept: a scheme that never enabled the
@@ -1959,7 +1961,10 @@ class SchemeBase {
     /** threshold key generation and decryption; set by Enable(MULTIPARTY) */
     std::shared_ptr<MultipartyBase<Element>> m_Multiparty;
     /** CKKS bootstrapping and functional bootstrapping; set by Enable(FHE) */
+  public:
     std::shared_ptr<FHEBase<Element>> m_FHE;
+
+  protected:
     /** CKKS <-> FHEW scheme switching; set by Enable(SCHEMESWITCH) */
     std::shared_ptr<FHEBase<Element>> m_SchemeSwitch;
 
