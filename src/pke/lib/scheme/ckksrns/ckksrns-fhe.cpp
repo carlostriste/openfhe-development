@@ -302,7 +302,23 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
         auto st = cryptoParams->GetScalingTechnique();
         uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size() - (st == FLEXIBLEAUTOEXT);
 
-        uint32_t lEnc = L0 - compositeDegree * (precom->m_paramsEnc.lvlb + 1);
+        // The extended-basis tower count L0 is the available modulus chain (depth+1 for
+        // FIXEDMANUAL). lEnc/lDec below are the towers left for the CoeffsToSlots/SlotsToCoeffs
+        // plaintexts after reserving the bootstrap's multiplicative depth. If a requested level
+        // budget needs more towers than exist, the subtraction would wrap (uint32_t) and feed an
+        // enormous value into Eval{SlotsToCoeffs,CoeffsToSlots}Precompute, whose tower-drop loop
+        // then erases at begin() - 1 (heap corruption). Reject such configurations explicitly.
+        uint32_t lEnc;
+        {
+            const uint32_t encCost = compositeDegree * (precom->m_paramsEnc.lvlb + 1);
+            if (encCost > L0) {
+                OPENFHE_THROW(
+                        "EvalBootstrapSetup: level budget too deep for the modulus chain: "
+                        "CoeffsToSlots needs " +
+                        std::to_string(encCost) + " towers but only " + std::to_string(L0) + " are available");
+            }
+            lEnc = L0 - encCost;
+        }
         uint32_t lDec;
         if (precom->BTSlotsEncoding) {
             lDec = (2 + (st == FLEXIBLEAUTOEXT)) * compositeDegree;
@@ -310,8 +326,18 @@ void FHECKKSRNS::EvalBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, std::
             uint32_t approxModDepth = modevallevels == std::numeric_limits<uint32_t>::max() ?
                                               GetModDepthInternal(cryptoParams->GetSecretKeyDist()) :
                                               modevallevels;
-            uint32_t depthBT = approxModDepth + precom->m_paramsEnc.lvlb + precom->m_paramsDec.lvlb;
-            lDec = L0 - compositeDegree * depthBT;
+            const uint32_t depthBT = approxModDepth + precom->m_paramsEnc.lvlb + precom->m_paramsDec.lvlb;
+            const uint32_t decCost = compositeDegree * depthBT;
+            if (decCost > L0) {
+                OPENFHE_THROW(
+                        "EvalBootstrapSetup: multiplicative depth too small for the requested "
+                        "level budget: bootstrapping needs " +
+                        std::to_string(decCost) + " towers (approxModDepth " + std::to_string(approxModDepth) +
+                        " + enc " + std::to_string(precom->m_paramsEnc.lvlb) + " + dec " +
+                        std::to_string(precom->m_paramsDec.lvlb) + ") but only " + std::to_string(L0) +
+                        " are available");
+            }
+            lDec = L0 - decCost;
         }
 
         bool isLTBootstrap = (precom->m_paramsEnc.lvlb == 1) && (precom->m_paramsDec.lvlb == 1);
