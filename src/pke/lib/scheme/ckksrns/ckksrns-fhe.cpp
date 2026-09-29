@@ -4684,4 +4684,37 @@ Ciphertext<DCRTPoly> FHECKKSRNS::KeySwitchSparse(Ciphertext<DCRTPoly>& ciphertex
     return result;
 }
 
+//------------------------------------------------------------------------------
+// Out-of-line runtime accessors to the (functional-)bootstrap approximation tables
+// (declared in ckksrns-fhe.h). Returning const references to the library's own
+// instances lets consumers read the tables of the installed release at runtime.
+//------------------------------------------------------------------------------
+const std::vector<double>& GetBootTableCoeffSparse() {
+    return FHECKKSRNS::g_coefficientsSparse;
+}
+const std::vector<double>& GetBootTableCoeffSparseEncapsulated() {
+    return FHECKKSRNS::g_coefficientsSparseEncapsulated;
+}
+const std::vector<double>& GetBootTableCoeffUniform() {
+    return FHECKKSRNS::g_coefficientsUniform;
+}
+const std::vector<double>& GetFbtTableCoeffCos16() {
+    return FHECKKSRNS::coeff_cos_16_double;
+}
+const std::vector<double>& GetFbtTableCoeffCos25() {
+    return FHECKKSRNS::coeff_cos_25_double;
+}
+const std::vector<double>& GetFbtTableCoeffCos512() {
+    return FHECKKSRNS::coeff_cos_512_double;
+}
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp46() {
+    return FHECKKSRNS::coeff_exp_16_double_46;
+}
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp58() {
+    return FHECKKSRNS::coeff_exp_25_double_58;
+}
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp66() {
+    return FHECKKSRNS::coeff_exp_25_double_66;
+}
+
 }  // namespace lbcrypto

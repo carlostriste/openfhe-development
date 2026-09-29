@@ -1489,6 +1489,21 @@ class FHECKKSRNS : public FHERNS {
             std::complex<double>(0, 7.211314011213e-11),  std::complex<double>(0, 4.426391086890e-11)};
 };
 
+    // Out-of-line runtime accessors to the CKKS (functional-)bootstrapping approximation
+    // tables. Defined in ckksrns-fhe.cpp and exported by the library, so consumers (e.g.
+    // FIDESlib) read the tables of the *installed* release at runtime through these symbols
+    // instead of re-materialising the static-inline header members at compile time — table
+    // changes across releases never need to be tracked or re-synced downstream.
+    const std::vector<double>& GetBootTableCoeffSparse();
+    const std::vector<double>& GetBootTableCoeffSparseEncapsulated();
+    const std::vector<double>& GetBootTableCoeffUniform();
+    const std::vector<double>& GetFbtTableCoeffCos16();
+    const std::vector<double>& GetFbtTableCoeffCos25();
+    const std::vector<double>& GetFbtTableCoeffCos512();
+    const std::vector<std::complex<double>>& GetFbtTableCoeffExp46();
+    const std::vector<std::complex<double>>& GetFbtTableCoeffExp58();
+    const std::vector<std::complex<double>>& GetFbtTableCoeffExp66();
+
 }  // namespace lbcrypto
 
 #endif  // SRC_PKE_INCLUDE_SCHEME_CKKSRNS_CKKSRNS_FHE_H_
