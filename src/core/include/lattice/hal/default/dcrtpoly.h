@@ -896,7 +896,6 @@ class DCRTPolyImpl final : public DCRTPolyInterface<DCRTPolyImpl<VecType>, VecTy
         m_vectors[index] = std::move(element);
     }
 
-  protected:
   public:
     std::shared_ptr<Params> m_params{std::make_shared<DCRTPolyImpl::Params>()};
     Format m_format{Format::EVALUATION};

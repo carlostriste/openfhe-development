@@ -34,6 +34,7 @@
 
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -144,7 +145,6 @@ using namespace std::literals::complex_literals;
  * multiplicative depth these procedures consume. All bootstrapping flavors require HYBRID key switching.
  */
 class FHECKKSRNS : public FHERNS {
-  private:
   public:
     // correction factor, which we scale the message by to improve precision
     uint32_t m_correctionFactor;
@@ -1489,20 +1489,20 @@ class FHECKKSRNS : public FHERNS {
             std::complex<double>(0, 7.211314011213e-11),  std::complex<double>(0, 4.426391086890e-11)};
 };
 
-    // Out-of-line runtime accessors to the CKKS (functional-)bootstrapping approximation
-    // tables. Defined in ckksrns-fhe.cpp and exported by the library, so consumers (e.g.
-    // FIDESlib) read the tables of the *installed* release at runtime through these symbols
-    // instead of re-materialising the static-inline header members at compile time — table
-    // changes across releases never need to be tracked or re-synced downstream.
-    const std::vector<double>& GetBootTableCoeffSparse();
-    const std::vector<double>& GetBootTableCoeffSparseEncapsulated();
-    const std::vector<double>& GetBootTableCoeffUniform();
-    const std::vector<double>& GetFbtTableCoeffCos16();
-    const std::vector<double>& GetFbtTableCoeffCos25();
-    const std::vector<double>& GetFbtTableCoeffCos512();
-    const std::vector<std::complex<double>>& GetFbtTableCoeffExp46();
-    const std::vector<std::complex<double>>& GetFbtTableCoeffExp58();
-    const std::vector<std::complex<double>>& GetFbtTableCoeffExp66();
+// Out-of-line runtime accessors to the CKKS (functional-)bootstrapping approximation
+// tables. Defined in ckksrns-fhe.cpp and exported by the library, so consumers (e.g.
+// FIDESlib) read the tables of the *installed* release at runtime through these symbols
+// instead of re-materialising the static-inline header members at compile time — table
+// changes across releases never need to be tracked or re-synced downstream.
+const std::vector<double>& GetBootTableCoeffSparse();
+const std::vector<double>& GetBootTableCoeffSparseEncapsulated();
+const std::vector<double>& GetBootTableCoeffUniform();
+const std::vector<double>& GetFbtTableCoeffCos16();
+const std::vector<double>& GetFbtTableCoeffCos25();
+const std::vector<double>& GetFbtTableCoeffCos512();
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp46();
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp58();
+const std::vector<std::complex<double>>& GetFbtTableCoeffExp66();
 
 }  // namespace lbcrypto
 
