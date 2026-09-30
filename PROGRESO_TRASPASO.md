@@ -171,3 +171,21 @@ en paralelo). El A/B nativo con el mismo binario y `LD_LIBRARY_PATH` conmutando 
 `libOPENFHEpke.so` (8 tests, 3 repeticiones alternas) da antes ≈ después, con picos aislados en ambos
 lados por carga. **No hay regresión real.** (Para benchmarks, correr nativo y con la máquina
 descargada; `gdb` no sirve para medir tiempos.)
+
+### Bit-exactitud de la evaluación Chebyshev (commit `b3b9fc13`)
+La 1.6.0 cambió (commit `56499713`) el tratamiento de las potencias / base de Chebyshev
+(`AdjustLevelsAndDepthInPlace`, potencias intactas), lo que altera los bits de toda evaluación
+Chebyshev respecto a la referencia `dev-pr-fideslib-remaining` (instalada en `/usr/local`). Se
+restauró la aritmética de la referencia en `ckksrns-advancedshe.cpp`:
+- `internalEvalPowersLinear` / `internalEvalPowersPS` / `internalEvalChebyPolysPS`: bucles de
+  reducción de nivel previos a `56499713` (`LevelReduceInPlace` con `compositeDegree`, y caso
+  `FIXEDMANUAL`).
+- `internalEvalPolyLinearWithPrecomp` / `internalEvalChebyshevSeriesLinearWithPrecomp`: acumulación
+  con `EvalAddInPlace` sobre un clon por término — aritméticamente idéntico al `EvalMultInPlace` de
+  la referencia, pero sin destruir las potencias precomputadas (necesario para el reuso de
+  `EvalPolyWithPrecomp` de 1.6.0).
+- El camino `EvalMult` con `target_level` **ya era idéntico** a la referencia (verificado a nivel de
+  tokens y con las tablas `GetScalingFactorReal{Big}`); la sospecha inicial sobre `target_level` no
+  era la causa.
+
+Verificación: `EVAL_POLY` + `EVAL_PRECOMP_REUSE` + bootstraps: **306/306 PASS**.
