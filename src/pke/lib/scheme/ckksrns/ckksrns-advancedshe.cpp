@@ -342,13 +342,12 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersLinear(ConstCiphertext
         }
     }
 
-    // Bring all computed powers to the level and the noise-scale degree of the top power, so that the terms of
-    // every series later evaluated from this basis add without any adjustment (under FIXEDMANUAL every power
-    // has degree 1, so only the number of towers is aligned), as in the Paterson-Stockmeyer basis.
-    auto algo = cc->GetScheme();
+    // brings all powers of x to the same level
     for (uint32_t i = 1; i < k; ++i) {
-        if (indices[i - 1])
-            algo->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+        if (indices[i - 1]) {
+            uint32_t diff = powers[k - 1]->GetLevel() - powers[i - 1]->GetLevel();
+            cc->LevelReduceInPlace(powers[i - 1], nullptr, diff / compositeDegree);
+        }
     }
 
     return std::make_shared<seriesPowers<DCRTPoly>>(std::move(powers));
@@ -385,10 +384,16 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersPS(ConstCiphertext<DCR
         cc->ModReduceInPlace(powers[i - 1]);
     }
 
-    // Bring all powers to the level and the noise-scale degree of the top power (under FIXEDMANUAL every power
-    // has degree 1, so only the number of towers is aligned).
-    for (uint32_t i = 1; i < k; ++i)
-        cc->GetScheme()->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+    const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(powers[k - 1]->GetCryptoParameters());
+    if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+        // brings all powers of x to the same level
+        uint32_t levelk = powers[k - 1]->GetLevel();
+        for (uint32_t i = 1; i < k; ++i)
+            cc->LevelReduceInPlace(powers[i - 1], nullptr, levelk - powers[i - 1]->GetLevel());
+    } else {
+        for (uint32_t i = 1; i < k; ++i)
+            cc->GetScheme()->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+    }
 
     // computes powers of form k*2^i for x and the product of the powers in power2, that yield x^{k(2*m - 1)}
     std::vector<Ciphertext<DCRTPoly>> powers2(m);
@@ -443,7 +448,7 @@ static inline Ciphertext<DCRTPoly> internalEvalPolyLinearWithPrecomp(const std::
     for (uint32_t i = 1; i < k; ++i) {
         if (IsNotEqualZero(coefficients[i])) {
             auto term = cc->EvalMult(powers[i - 1], coefficients[i]);
-            cc->EvalAddMutableInPlace(result, term);
+            cc->EvalAddInPlace(result, term);
         }
     }
 
@@ -672,11 +677,10 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalChebyPolysLinear(ConstCipher
         }
     }
 
-    // Bring all polynomials to the level and the noise-scale degree of the top one, so that the terms of every
-    // series later evaluated from this basis add without any adjustment (see internalEvalPowersLinear).
-    auto algo = cc->GetScheme();
+    uint32_t compositeDegree =
+            std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters())->GetCompositeDegree();
     for (uint32_t i = 1; i < k; ++i)
-        algo->AdjustLevelsAndDepthInPlace(T[i - 1], T[k - 1]);
+        cc->LevelReduceInPlace(T[i - 1], nullptr, (T[k - 1]->GetLevel() - T[i - 1]->GetLevel()) / compositeDegree);
 
     return std::make_shared<seriesPowers<DCRTPoly>>(std::move(T));
 }
@@ -696,7 +700,7 @@ Ciphertext<DCRTPoly> internalEvalChebyshevSeriesLinearWithPrecomp(const std::vec
     for (uint32_t i = 0; i < k; ++i) {
         if (IsNotEqualZero(coefficients[i + 1])) {
             auto term = cc->EvalMult(T[i], coefficients[i + 1]);
-            cc->EvalAddMutableInPlace(result, term);
+            cc->EvalAddInPlace(result, term);
         }
     }
 
