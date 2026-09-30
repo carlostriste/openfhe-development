@@ -4665,6 +4665,15 @@ Ciphertext<DCRTPoly> FHECKKSRNS::KeySwitchSparse(Ciphertext<DCRTPoly>& ciphertex
 // Out-of-line runtime accessors to the (functional-)bootstrap approximation tables
 // (declared in ckksrns-fhe.h). Returning const references to the library's own
 // instances lets consumers read the tables of the installed release at runtime.
+//
+// NOTE (OpenFHE 1.6.0 port): the functional-bootstrapping tables were retuned in
+// 1.6.0, so some accessors expose the renamed role-equivalent tables:
+//   coeff_cos_16_double    -> coeff_cos_16_double_50    (SPARSE_ENCAPSULATED cos)
+//   coeff_cos_25_double    -> coeff_cos_28_double_68    (default K=28 cos)
+//   coeff_cos_512_double   -> coeff_cos_672_double_104  (UNIFORM_TERNARY cos)
+//   coeff_exp_25_double_58 -> coeff_exp_28_double_69    (default K=28 exp)
+//   coeff_exp_25_double_66 -> coeff_exp_28_double_69    (default K=28 exp; 1.6.0 no
+//                                                        longer splits on digitBitSize)
 //------------------------------------------------------------------------------
 const std::vector<double>& GetBootTableCoeffSparse() {
     return FHECKKSRNS::g_coefficientsSparse;
@@ -4676,22 +4685,22 @@ const std::vector<double>& GetBootTableCoeffUniform() {
     return FHECKKSRNS::g_coefficientsUniform;
 }
 const std::vector<double>& GetFbtTableCoeffCos16() {
-    return FHECKKSRNS::coeff_cos_16_double;
+    return FHECKKSRNS::coeff_cos_16_double_50;
 }
 const std::vector<double>& GetFbtTableCoeffCos25() {
-    return FHECKKSRNS::coeff_cos_25_double;
+    return FHECKKSRNS::coeff_cos_28_double_68;
 }
 const std::vector<double>& GetFbtTableCoeffCos512() {
-    return FHECKKSRNS::coeff_cos_512_double;
+    return FHECKKSRNS::coeff_cos_672_double_104;
 }
 const std::vector<std::complex<double>>& GetFbtTableCoeffExp46() {
     return FHECKKSRNS::coeff_exp_16_double_46;
 }
 const std::vector<std::complex<double>>& GetFbtTableCoeffExp58() {
-    return FHECKKSRNS::coeff_exp_25_double_58;
+    return FHECKKSRNS::coeff_exp_28_double_69;
 }
 const std::vector<std::complex<double>>& GetFbtTableCoeffExp66() {
-    return FHECKKSRNS::coeff_exp_25_double_66;
+    return FHECKKSRNS::coeff_exp_28_double_69;
 }
 
 }  // namespace lbcrypto
