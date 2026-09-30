@@ -1545,6 +1545,17 @@ const std::vector<std::complex<double>>& GetFbtTableCoeffExp46();
 const std::vector<std::complex<double>>& GetFbtTableCoeffExp58();
 const std::vector<std::complex<double>>& GetFbtTableCoeffExp66();
 
+// FE (Fourier extension) functional bootstrapping tables + constants
+// (EvalFEFuncBootstrapSetup / EvalFEFuncBootstrap). Exposed the same way as the FBT tables so
+// consumers read the tables of the installed release at runtime.
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp696();
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp28();
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp16();
+uint32_t GetFEFuncKUniform();
+uint32_t GetFEFuncRfunc696();
+uint32_t GetFEFuncRfunc28();
+uint32_t GetFEFuncRfunc16();
+
 }  // namespace lbcrypto
 
 #endif  // SRC_PKE_INCLUDE_SCHEME_CKKSRNS_CKKSRNS_FHE_H_
