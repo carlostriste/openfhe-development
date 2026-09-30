@@ -686,7 +686,11 @@ class CryptoParametersRNS : public CryptoParametersRLWE<DCRTPoly> {
         if (m_scalTechnique == FLEXIBLEAUTO || m_scalTechnique == FLEXIBLEAUTOEXT ||
             m_scalTechnique == COMPOSITESCALINGAUTO || m_scalTechnique == COMPOSITESCALINGMANUAL) {
             if (l >= m_scalingFactorsReal.size()) {
-                // TODO: Return an error here.
+                std::string s = "invalid level ";
+                s += std::to_string(l);
+                s += " greater/eq than ";
+                s += std::to_string(m_scalingFactorsReal.size());
+                OPENFHE_THROW(s);
                 return m_approxSF;
             }
 
@@ -709,8 +713,12 @@ class CryptoParametersRNS : public CryptoParametersRLWE<DCRTPoly> {
         if (m_scalTechnique == FLEXIBLEAUTO || m_scalTechnique == FLEXIBLEAUTOEXT ||
             m_scalTechnique == COMPOSITESCALINGAUTO || m_scalTechnique == COMPOSITESCALINGMANUAL) {
             if (l >= m_scalingFactorsRealBig.size()) {
-                // TODO: Return an error here.
-                return m_approxSF;
+                std::string s = "invalid level ";
+                s += std::to_string(l);
+                s += " greater/eq than ";
+                s += std::to_string(m_scalingFactorsRealBig.size());
+                OPENFHE_THROW(s);
+                return m_approxSF * m_approxSF;
             }
 
             return m_scalingFactorsRealBig[l];
