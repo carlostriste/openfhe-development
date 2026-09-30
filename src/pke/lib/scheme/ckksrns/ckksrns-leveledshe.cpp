@@ -880,7 +880,6 @@ void LeveledSHECKKSRNS::EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, do
 void LeveledSHECKKSRNS::EvalMultCoreInPlace(Ciphertext<DCRTPoly>& ciphertext, std::complex<double> operand,
                                             int32_t target_level) const {
     auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
-    // double scFactor   = cryptoParams->GetScalingFactorReal(ciphertext->GetLevel());
     double scFactor;
     if (target_level == -1) {
         scFactor = cryptoParams->GetScalingFactorReal(ciphertext->GetLevel());
