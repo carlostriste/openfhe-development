@@ -163,8 +163,11 @@ Es la base canónica de `dev-pr` (limpieza del prototipo FIDESlib) y **no** esta
 - (Antes del port, `target_level` solo estaba a medias: la firma existía pero se ignoraba; ahora está
   cableado.)
 
-**Nota de rendimiento (a revisar)**: aplicado sobre 1.6.0, 43 de los 222 tests de bootstrap/CS/SPARSE_KS
-se ralentizan >2× respecto a 1.6.0 sin el refactor (p. ej. `BOOTSTRAP_SERIALIZE_01` 397 ms → 21.4 s,
-`BOOTSTRAP_NUM_TOWERS_18` 158 ms → 4.9 s); la mediana apenas cambia (~1.02×). Es el comportamiento
-canónico de dev-pr; si molesta, habría que reconciliar el refactor con las optimizaciones propias de
-1.6.0 (la rama `56499713`/`a957c3c0`).
+**Nota de rendimiento**: una primera medición sugirió regresiones (hasta ×54), pero era un artefacto
+de medición: (1) las suites se corrían bajo `gdb`, que infla 48/222 tests >2× (hasta ×70) por el coste
+de sus eventos de hilos/OpenMP — el mismo binario da `BOOTSTRAP_SERIALIZE_01` 21.4 s bajo gdb vs
+**299 ms nativo**; (2) la máquina estaba muy cargada (load average ~33 por tests de FIDESlib corriendo
+en paralelo). El A/B nativo con el mismo binario y `LD_LIBRARY_PATH` conmutando solo
+`libOPENFHEpke.so` (8 tests, 3 repeticiones alternas) da antes ≈ después, con picos aislados en ambos
+lados por carga. **No hay regresión real.** (Para benchmarks, correr nativo y con la máquina
+descargada; `gdb` no sirve para medir tiempos.)
