@@ -110,3 +110,41 @@ git diff dev-pr dev-pr-fideslib-remaining | diff - /tmp/opencode/dev-pr-fideslib
 1. **Regresión del resto del repo** si se desea seguridad total (correr `pke_tests` completo).
 2. El fix/ambos `m==slots` ya está en `dev-pr` y `dev-pr-fideslib-remaining`; cualquier trabajo
    nuevo debe partir de cualquiera de las dos (no de las ramas de experimento, eliminadas).
+
+---
+
+## 7. Port a OpenFHE v1.6.0 (rama `v1.6.0-fideslib`)
+
+Base: tag `v1.6.0` (`6206d24f`). Se portó el **delta completo** `68d64abc..dev-pr-fideslib-remaining`
+(5 commits cherry-picked con `-x`), resolviendo 42 conflictos en 11 archivos.
+
+- Criterio: conservar sólo cambios funcionales; en logging/estilo/formato se prefirió upstream
+  (p. ej. `OPENFHE_DIAGNOSTIC_ERR` en lugar de `std::cout/cerr`).
+- Se descartaron del commit `7178e03e` los cambios no funcionales de `CMakeLists.txt` y el `.rst`.
+- Se limpiaron los marcadores de conflicto que la rama traía commiteados
+  (`ckksrns-fhe.cpp` en `#ifdef BOOTSTRAPTIMING` y `cmake_in_openfhe.rst`) y restos de depuración.
+- `m==slots` en `ckksrns-utils.cpp` queda aplicado (v1.6.0 aún tenía `m == 2`); el
+  `rotScale = shiftScaleRem * p.gRem` ya lo trae 1.6.0.
+
+### Adaptación de los accessors FBT (commit `26882db5`)
+1.6.0 retuneó/renombró las tablas de functional bootstrapping. Mapeo por rol:
+```
+coeff_cos_16_double    -> coeff_cos_16_double_50    (SPARSE_ENCAPSULATED cos)
+coeff_cos_25_double    -> coeff_cos_28_double_68    (default K=28 cos)
+coeff_cos_512_double   -> coeff_cos_672_double_104  (UNIFORM_TERNARY cos)
+coeff_exp_25_double_58 -> coeff_exp_28_double_69    (default K=28 exp)
+coeff_exp_25_double_66 -> coeff_exp_28_double_69    (default K=28 exp; 1.6.0 ya no
+                                                     distingue por digitBitSize)
+```
+**A confirmar**: `Exp58`/`Exp66` colapsan a la misma tabla 1.6.0; verificar que FIDESlib no
+necesite distinguirlas.
+
+### Verificación
+- `pke_tests` compila completo con la rama.
+- `UTCKKSRNS_SPARSE_KS.*` + `UnitTests/UTCKKSRNS_BOOT.*` + `UnitTests/UTCKKSRNSCS_BOOT.*`:
+  **222/222 PASS** (incluye los 4 `BOOTSTRAP_NUM_TOWERS_05/06/13/14` que fallaban en dev-pr;
+  en 1.6.0 ya pasan).
+- **Fallo pre-existente (NO del port)**: v1.6.0 aborta en el destructor global de `libOPENFHEcore`
+  con `double free or corruption (!prev)` al terminar *cualquier* test (también un test BFVRNS sin
+  relación con estos cambios). Los tests pasan; el abort ocurre en `__cxa_finalize`. Correr bajo
+  `gdb` evita el bloqueo del manejador de aborto posterior.
