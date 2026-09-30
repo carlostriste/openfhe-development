@@ -125,6 +125,9 @@ Base: tag `v1.6.0` (`6206d24f`). Se portó el **delta completo** `68d64abc..dev-
   (`ckksrns-fhe.cpp` en `#ifdef BOOTSTRAPTIMING` y `cmake_in_openfhe.rst`) y restos de depuración.
 - `m==slots` en `ckksrns-utils.cpp` queda aplicado (v1.6.0 aún tenía `m == 2`); el
   `rotScale = shiftScaleRem * p.gRem` ya lo trae 1.6.0.
+- Se restauraron los `OPENFHE_THROW` de `GetScalingFactorReal` y `GetScalingFactorRealBig` (1.6.0
+  los había sustituido por un retorno silencioso de `m_approxSF`), y en `GetScalingFactorRealBig`
+  el fallback vuelve a ser `m_approxSF * m_approxSF` (correcto para grado 2).
 
 ### Adaptación de los accessors FBT (commit `26882db5`)
 1.6.0 retuneó/renombró las tablas de functional bootstrapping. Mapeo por rol:
