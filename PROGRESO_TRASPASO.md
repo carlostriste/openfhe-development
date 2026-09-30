@@ -147,7 +147,24 @@ necesite distinguirlas.
 - `UTCKKSRNS_SPARSE_KS.*` + `UnitTests/UTCKKSRNS_BOOT.*` + `UnitTests/UTCKKSRNSCS_BOOT.*`:
   **222/222 PASS** (incluye los 4 `BOOTSTRAP_NUM_TOWERS_05/06/13/14` que fallaban en dev-pr;
   en 1.6.0 ya pasan).
+- `UnitTests/UTCKKSRNS_EVAL_POLY.*` + `DegreeTwoConstantsChebyshev119`: **84/84 PASS**.
 - **Fallo pre-existente (NO del port)**: v1.6.0 aborta en el destructor global de `libOPENFHEcore`
   con `double free or corruption (!prev)` al terminar *cualquier* test (también un test BFVRNS sin
   relación con estos cambios). Los tests pasan; el abort ocurre en `__cxa_finalize`. Correr bajo
   `gdb` evita el bloqueo del manejador de aborto posterior.
+
+### Refactor EvalChebyPS (`68d64abc`) — commit `d91b8ff8`
+Es la base canónica de `dev-pr` (limpieza del prototipo FIDESlib) y **no** estaba en 1.6.0. Aporta:
+- `InnerEvalChebyshevPS(..., int32_t level_offset)` y `EvalPartialLinearWSumWithBias` (nuevo orden
+  `Rescale(cu*qu + su)`), preámbulo de rango de entrada, y menos `adjustForMult/Add`.
+- API `target_level` completa: `EvalMult`/`EvalMultInPlace`/`EvalLinearWSum(Mutable)` en
+  `cryptocontext.h`, `base-scheme.h`, `base-leveledshe.h`, `base-advancedshe.h`, `ckksrns-leveledshe.*`,
+  `ckksrns-advancedshe.*`, y `GetElementForEvalMult(..., scaling_factor)`.
+- (Antes del port, `target_level` solo estaba a medias: la firma existía pero se ignoraba; ahora está
+  cableado.)
+
+**Nota de rendimiento (a revisar)**: aplicado sobre 1.6.0, 43 de los 222 tests de bootstrap/CS/SPARSE_KS
+se ralentizan >2× respecto a 1.6.0 sin el refactor (p. ej. `BOOTSTRAP_SERIALIZE_01` 397 ms → 21.4 s,
+`BOOTSTRAP_NUM_TOWERS_18` 158 ms → 4.9 s); la mediana apenas cambia (~1.02×). Es el comportamiento
+canónico de dev-pr; si molesta, habría que reconciliar el refactor con las optimizaciones propias de
+1.6.0 (la rama `56499713`/`a957c3c0`).
