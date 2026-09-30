@@ -4752,4 +4752,27 @@ const std::vector<std::complex<double>>& GetFbtTableCoeffExp66() {
     return FHECKKSRNS::coeff_exp_28_double_69;
 }
 
+// FE (Fourier extension) functional bootstrapping tables + constants.
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp696() {
+    return FHECKKSRNS::coeff_exp_696_double_27;
+}
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp28() {
+    return FHECKKSRNS::coeff_exp_28_double_48;
+}
+const std::vector<std::complex<double>>& GetFEFuncTableCoeffExp16() {
+    return FHECKKSRNS::coeff_exp_16_double_23;
+}
+uint32_t GetFEFuncKUniform() {
+    return FHECKKSRNS::K_UNIFORM_FEFBT;
+}
+uint32_t GetFEFuncRfunc696() {
+    return FHECKKSRNS::R_func_696_double_27;
+}
+uint32_t GetFEFuncRfunc28() {
+    return FHECKKSRNS::R_func_28_double_48;
+}
+uint32_t GetFEFuncRfunc16() {
+    return FHECKKSRNS::R_func_16_double_23;
+}
+
 }  // namespace lbcrypto
