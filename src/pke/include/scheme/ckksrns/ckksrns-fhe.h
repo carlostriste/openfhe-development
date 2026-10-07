@@ -112,6 +112,10 @@ class CKKSBootstrapPrecom {
     /// flag indicating whether we perform StC before ModRaise
     bool BTSlotsEncoding;
 
+    /// extra towers left below the SlotsToCoeffs output in EvalFEFuncBootstrapSetup(decodeFirst=true),
+    /// so a caller can run a leveled computation on the decoded ciphertext before the modulus raise
+    uint32_t m_fefuncBudgetDec = 0;
+
     template <class Archive>
     void save(Archive& ar) const {
         ar(cereal::make_nvp("dim1_Enc", m_paramsEnc.g));
@@ -245,7 +249,8 @@ class FHECKKSRNS : public FHERNS {
      * @param numSlots number of slots to be bootstrapped (0 = full packing, N/2 slots)
      */
     void EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc, const std::vector<uint32_t>& levelBudget,
-                                  const std::vector<uint32_t>& dim1, uint32_t numSlots) override;
+                                  const std::vector<uint32_t>& dim1, uint32_t numSlots, bool decodeFirst = true,
+                                  uint32_t depthDecode = 0, uint32_t budgetDec = 0) override;
 
     /**
      * Refreshes a ciphertext and evaluates a function on it in one pass by evaluating the Fourier extension of

@@ -3778,8 +3778,9 @@ class CryptoContextImpl : public Serializable {
      * @param slots        Number of slots to be bootstrapped (0 = full packing).
      */
     void EvalFEFuncBootstrapSetup(const std::vector<uint32_t>& levelBudget = {5, 4},
-                                  const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0) {
-        GetScheme()->EvalFEFuncBootstrapSetup(*this, levelBudget, dim1, slots);
+                                  const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0,
+                                  bool decodeFirst = true, uint32_t depthDecode = 0, uint32_t budgetDec = 0) {
+        GetScheme()->EvalFEFuncBootstrapSetup(*this, levelBudget, dim1, slots, decodeFirst, depthDecode, budgetDec);
     }
 
     /**

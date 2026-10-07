@@ -1486,7 +1486,8 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalBootstrapStCFirst(ConstCiphertext<DCRTPoly>
 
 void FHECKKSRNS::EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc,
                                           const std::vector<uint32_t>& levelBudget, const std::vector<uint32_t>& dim1,
-                                          uint32_t numSlots) {
+                                          uint32_t numSlots, bool decodeFirst, uint32_t depthDecode,
+                                          uint32_t budgetDec) {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(cc.GetCryptoParameters());
 
     if (cryptoParams->GetKeySwitchTechnique() != HYBRID)
@@ -1501,7 +1502,13 @@ void FHECKKSRNS::EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc,
     m_bootPrecomMap[slots] = std::make_shared<CKKSBootstrapPrecom>();
     auto& precom = m_bootPrecomMap[slots];
     precom->m_slots = slots;
-    precom->BTSlotsEncoding = true;
+    // decodeFirst=true is the reference SlotsToCoeffs-first order; false selects the ModRaise-first
+    // order (the SlotsToCoeffs is moved to the end of the stage cycle), whose SlotsToCoeffs
+    // plaintext is encoded for the end-position tower count L0 - depthDecode.
+    precom->BTSlotsEncoding = decodeFirst;
+    // Extra towers left below the SlotsToCoeffs output (decodeFirst=true) so a caller can run a
+    // leveled computation on the decoded ciphertext before the modulus raise.
+    precom->m_fefuncBudgetDec = decodeFirst ? budgetDec : 0;
 
     // even for the case of a single slot we need one level for rescaling
     uint32_t logSlots = (slots < 3) ? 1 : std::log2(slots);
@@ -1602,7 +1609,20 @@ void FHECKKSRNS::EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc,
     uint32_t L0 = cryptoParams->GetElementParams()->GetParams().size() - (st == FLEXIBLEAUTOEXT);
 
     uint32_t lEnc = L0 - compositeDegree * (precom->m_paramsEnc.lvlb + 1);
-    uint32_t lDec = (2 + (st == FLEXIBLEAUTOEXT)) * compositeDegree;
+    uint32_t lDec;
+    if (decodeFirst) {
+        // budgetDec extra output towers below the SlotsToCoeffs so a caller can spend levels on a
+        // leveled computation before the modulus raise (the input has lDec + compDeg*lvlbDec towers).
+        lDec = (2 + (st == FLEXIBLEAUTOEXT)) * compositeDegree + budgetDec;
+    } else {
+        // ModRaise-first: the SlotsToCoeffs sits at the END of the stage cycle, so its plaintext is
+        // encoded for the tower count left after the exponential (expDepth + rFunc double-angle)
+        // and the target Fourier series: lDec = L0 - depthDecode, where the caller passes
+        // depthDecode = GetFEFBTDepth(levelBudget, coeffs, skd, firstModSize).
+        if (depthDecode == 0 || depthDecode > L0)
+            OPENFHE_THROW("EvalFEFuncBootstrapSetup(decodeFirst=false): depthDecode must be in (0, L0].");
+        lDec = L0 - depthDecode;
+    }
 
     bool isLTBootstrap = (precom->m_paramsEnc.lvlb == 1) && (precom->m_paramsDec.lvlb == 1);
 
@@ -1640,7 +1660,7 @@ void FHECKKSRNS::EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc,
             precom->m_U0hatTPre = EvalLinearTransformPrecompute(cc, U0hatT, scaleEnc, lEnc);
         }
     } else {
-        bool flagPack = !(cc.GetCKKSDataType() == REAL);
+        bool flagPack = decodeFirst ? !(cc.GetCKKSDataType() == REAL) : false;
         precom->m_U0PreFFT = EvalSlotsToCoeffsPrecompute(cc, ksiPows, rotGroup, false, scaleDec, lDec, flagPack);
         precom->m_U0hatTPreFFT = EvalCoeffsToSlotsPrecompute(cc, ksiPows, rotGroup, false, scaleEnc, lEnc, flagPack);
     }
@@ -1733,7 +1753,9 @@ Ciphertext<DCRTPoly> FHECKKSRNS::EvalFEFuncBootstrapExp(ConstCiphertext<DCRTPoly
     // The SlotsToCoeffs matrix is encoded for an input with compositeDegree * (lvlb + 2) towers
     // remaining (lDec in EvalFEFuncBootstrapSetup), so each level below costs compositeDegree towers.
     // FLEXIBLEAUTOEXT (one extra tower) and composite scaling are mutually exclusive.
-    auto expectedLevel = L0 - compositeDegree * (p.m_paramsDec.lvlb + 2) - (st == FLEXIBLEAUTOEXT);
+    // m_fefuncBudgetDec keeps that many extra towers below the SlotsToCoeffs output.
+    auto expectedLevel = L0 - compositeDegree * (p.m_paramsDec.lvlb + 2) - (st == FLEXIBLEAUTOEXT) -
+                         p.m_fefuncBudgetDec;
 
     if (ctxtDepleted->GetLevel() + compositeDegree * (ctxtDepleted->GetNoiseScaleDeg() - 1) > expectedLevel) {
         OPENFHE_THROW("Not enough levels to perform FE functional bootstrapping.");
