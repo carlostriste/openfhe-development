@@ -196,7 +196,8 @@ class FHEBase {
      */
     virtual void EvalFEFuncBootstrapSetup(const CryptoContextImpl<DCRTPoly>& cc,
                                           const std::vector<uint32_t>& levelBudget, const std::vector<uint32_t>& dim1,
-                                          uint32_t numSlots) {
+                                          uint32_t numSlots, bool decodeFirst = true, uint32_t depthDecode = 0,
+                                          uint32_t budgetDec = 0) {
         OPENFHE_THROW(NOT_SUPPORTED_SIMPLE_ERROR);
     }
 

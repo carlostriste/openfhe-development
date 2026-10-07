@@ -1526,9 +1526,10 @@ class SchemeBase {
 
     void EvalFEFuncBootstrapSetup(const CryptoContextImpl<Element>& cc,
                                   const std::vector<uint32_t>& levelBudget = {5, 4},
-                                  const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0) {
+                                  const std::vector<uint32_t>& dim1 = {0, 0}, uint32_t slots = 0,
+                                  bool decodeFirst = true, uint32_t depthDecode = 0, uint32_t budgetDec = 0) {
         VerifyFHEEnabled(__func__);
-        m_FHE->EvalFEFuncBootstrapSetup(cc, levelBudget, dim1, slots);
+        m_FHE->EvalFEFuncBootstrapSetup(cc, levelBudget, dim1, slots, decodeFirst, depthDecode, budgetDec);
     }
 
     Ciphertext<Element> EvalFEFuncBootstrap(ConstCiphertext<Element>& ciphertext,
