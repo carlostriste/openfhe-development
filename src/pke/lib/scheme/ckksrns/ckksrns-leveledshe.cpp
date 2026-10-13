@@ -457,11 +457,21 @@ std::vector<DCRTPoly::Integer> LeveledSHECKKSRNS::GetElementForEvalAddOrSub(Cons
 
 #if NATIVEINT == 128
 std::vector<DCRTPoly::Integer> LeveledSHECKKSRNS::GetElementForEvalMult(ConstCiphertext<DCRTPoly>& ciphertext,
-                                                                        double operand) const {
+                                                                        double operand, double scaling_factor) const {
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(ciphertext->GetCryptoParameters());
 
     uint32_t precision = 52;
     double powP = std::pow(2, precision);
+
+    // Target-level support: the 64-bit branch encodes the constant scaled by the requested
+    // scFactor (or, when scaling_factor == -1, by the level's scaling factor). This branch
+    // encodes the constant at the canonical scaling factor 2^P (P = GetPlaintextModulus()), so
+    // when a target scFactor is supplied we prescale the operand by scFactor / 2^P; the shift
+    // below then lands the constant on scFactor. With scaling_factor == -1 the operand is left
+    // untouched and the behaviour is identical to before (encode at 2^P).
+    if (scaling_factor != -1.0) {
+        operand *= scaling_factor / std::exp2(cryptoParams->GetPlaintextModulus());
+    }
 
     // the idea is to break down real numbers
     // expressed as input_mantissa * 2^input_exponent

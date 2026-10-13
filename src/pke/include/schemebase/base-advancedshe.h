@@ -233,6 +233,26 @@ class AdvancedSHEBase {
     }
 
     /**
+     * FIDESlib fused variant of EvalPowers (see the CKKS implementation). The CPU implementation is a
+     * bit-exact reference only; it carries no fused speed-up.
+     */
+    virtual std::shared_ptr<seriesPowers<Element>> EvalPowers(ConstCiphertext<Element>& ciphertext,
+                                                              const std::vector<int64_t>& coefficients,
+                                                              bool fused) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+    virtual std::shared_ptr<seriesPowers<Element>> EvalPowers(ConstCiphertext<Element>& ciphertext,
+                                                              const std::vector<double>& coefficients,
+                                                              bool fused) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+    virtual std::shared_ptr<seriesPowers<Element>> EvalPowers(ConstCiphertext<Element>& ciphertext,
+                                                              const std::vector<std::complex<double>>& coefficients,
+                                                              bool fused) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+
+    /**
      * Method for polynomial evaluation for polynomials represented in the power series.
      * Uses EvalPolyLinear() for low polynomial degrees (degree < 5), or EvalPolyPS() for higher degrees.
      *
@@ -312,6 +332,24 @@ class AdvancedSHEBase {
      */
     virtual Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
                                                     const std::vector<std::complex<double>>& coefficients) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+
+    /**
+     * FIDESlib fused variant of EvalPolyWithPrecomp (see the CKKS implementation). The CPU implementation
+     * is a bit-exact reference only; it carries no fused speed-up.
+     */
+    virtual Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
+                                                    const std::vector<int64_t>& coefficients, bool fused) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+    virtual Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
+                                                    const std::vector<double>& coefficients, bool fused) const {
+        OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
+    }
+    virtual Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
+                                                    const std::vector<std::complex<double>>& coefficients,
+                                                    bool fused) const {
         OPENFHE_THROW(NOT_IMPLEMENTED_ERROR);
     }
 

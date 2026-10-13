@@ -2887,6 +2887,26 @@ class CryptoContextImpl : public Serializable {
     }
 
     /**
+     * @brief FIDESlib fused variant of EvalPowers (CKKS only).
+     *
+     * Same power set, built with the FIDESlib fused discipline (ungated internal rescale, no final
+     * level alignment, unreduced powers2 retained for EvalPolyWithPrecomp). The CPU implementation is a
+     * bit-exact reference for the FIDESlib GPU transcription; it carries no fused speed-up.
+     *
+     * @param ciphertext    Input ciphertext.
+     * @param coefficients  Polynomial coefficients (vector's size = (degree + 1)).
+     * @param fused         Select the FIDESlib fused power build.
+     * @return Resulting structure of powers.
+     */
+    template <typename VectorDataType = double>
+    std::shared_ptr<seriesPowers<Element>> EvalPowers(ConstCiphertext<Element>& ciphertext,
+                                                      const std::vector<VectorDataType>& coefficients,
+                                                      bool fused) const {
+        ValidateCiphertext(ciphertext);
+        return m_scheme->EvalPowers(ciphertext, coefficients, fused);
+    }
+
+    /**
      * @brief Evaluates a polynomial (given as a power series) on a ciphertext (CKKS only).
      *        Use EvalPolyLinear() for low polynomial degrees (degree < 5), or EvalPolyPS() for higher degrees.
      *
@@ -2917,6 +2937,25 @@ class CryptoContextImpl : public Serializable {
                                             const std::vector<VectorDataType>& coefficients) const {
         ValidateSeriesPowers(powers);
         return m_scheme->EvalPolyWithPrecomp(powers, coefficients);
+    }
+
+    /**
+     * @brief FIDESlib fused variant of EvalPolyWithPrecomp (CKKS only).
+     *
+     * Evaluates a polynomial from a fused EvalPowers precomputation with the FIDESlib fused
+     * Patterson-Stockmeyer discipline. The CPU implementation is a bit-exact reference for the
+     * FIDESlib GPU transcription; it carries no fused speed-up.
+     *
+     * @param powers        Powers returned by the fused EvalPowers.
+     * @param coefficients  Polynomial coefficients (vector's size = (degree + 1)).
+     * @param fused         Select the FIDESlib fused evaluation.
+     * @return Resulting ciphertext.
+     */
+    template <typename VectorDataType = double>
+    Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
+                                            const std::vector<VectorDataType>& coefficients, bool fused) const {
+        ValidateSeriesPowers(powers);
+        return m_scheme->EvalPolyWithPrecomp(powers, coefficients, fused);
     }
 
     /**

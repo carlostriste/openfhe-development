@@ -147,6 +147,20 @@ class AdvancedSHECKKSRNS : public AdvancedSHERNS {
     std::shared_ptr<seriesPowers<DCRTPoly>> EvalPowers(
             ConstCiphertext<DCRTPoly>& x, const std::vector<std::complex<double>>& coefficients) const override;
 
+    /**
+     * FIDESlib fused variants of EvalPowers: identical power sets, but built with the FIDESlib fused
+     * discipline (ungated ModReduceInternalInPlace rescale, no final level alignment, and the unreduced
+     * powers2 stored). The CPU implementation has no fused speed-up — it only needs to reproduce the
+     * FIDESlib GPU transcription bit-for-bit.
+     */
+    std::shared_ptr<seriesPowers<DCRTPoly>> EvalPowers(ConstCiphertext<DCRTPoly>& x,
+                                                       const std::vector<int64_t>& coefficients, bool fused) const override;
+    std::shared_ptr<seriesPowers<DCRTPoly>> EvalPowers(ConstCiphertext<DCRTPoly>& x,
+                                                       const std::vector<double>& coefficients, bool fused) const override;
+    std::shared_ptr<seriesPowers<DCRTPoly>> EvalPowers(ConstCiphertext<DCRTPoly>& x,
+                                                       const std::vector<std::complex<double>>& coefficients,
+                                                       bool fused) const override;
+
     Ciphertext<DCRTPoly> EvalPoly(ConstCiphertext<DCRTPoly>& ciphertext,
                                   const std::vector<int64_t>& coefficients) const override;
     /**
@@ -203,6 +217,18 @@ class AdvancedSHECKKSRNS : public AdvancedSHERNS {
      */
     Ciphertext<DCRTPoly> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> powers,
                                              const std::vector<std::complex<double>>& coefficients) const override;
+
+    /**
+     * FIDESlib fused variants of EvalPolyWithPrecomp: evaluate the (fused) power precomputation with the
+     * FIDESlib fused PS discipline. Bit-exact to the FIDESlib GPU transcription, with no CPU speed-up.
+     */
+    Ciphertext<DCRTPoly> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> powers,
+                                             const std::vector<int64_t>& coefficients, bool fused) const override;
+    Ciphertext<DCRTPoly> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> powers,
+                                             const std::vector<double>& coefficients, bool fused) const override;
+    Ciphertext<DCRTPoly> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> powers,
+                                             const std::vector<std::complex<double>>& coefficients,
+                                             bool fused) const override;
 
     Ciphertext<DCRTPoly> EvalPolyLinear(ConstCiphertext<DCRTPoly>& x,
                                         const std::vector<int64_t>& coefficients) const override;

@@ -83,6 +83,9 @@ struct seriesPowers {
     std::vector<Ciphertext<Element>> powersRe;
     /** powers of degree k*2^i, i = 0..m-1, of the real part (Paterson-Stockmeyer only) */
     std::vector<Ciphertext<Element>> powers2Re;
+    /** unreduced (pre-ModReduce) powers2, FIDESlib fused path only: used by the fused PS add/rescale
+     * ordering so the add of powers2 and the trailing rescale reproduce the GPU transcription bit-for-bit */
+    std::vector<Ciphertext<Element>> powers2NoRescaleRe;
     /** power of degree k*(2m-1) of the real part (Paterson-Stockmeyer only) */
     Ciphertext<Element> power2km1Re;
     /** Paterson-Stockmeyer baby-step degree k */

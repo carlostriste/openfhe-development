@@ -1036,6 +1036,14 @@ class SchemeBase {
     }
 
     template <typename VectorDataType = double>
+    std::shared_ptr<seriesPowers<Element>> EvalPowers(ConstCiphertext<Element>& ciphertext,
+                                                      const std::vector<VectorDataType>& coefficients,
+                                                      bool fused) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        return m_AdvancedSHE->EvalPowers(ciphertext, coefficients, fused);
+    }
+
+    template <typename VectorDataType = double>
     Ciphertext<Element> EvalPoly(ConstCiphertext<Element>& ciphertext,
                                  const std::vector<VectorDataType>& coefficients) const {
         VerifyAdvancedSHEEnabled(__func__);
@@ -1047,6 +1055,13 @@ class SchemeBase {
                                             const std::vector<VectorDataType>& coefficients) const {
         VerifyAdvancedSHEEnabled(__func__);
         return m_AdvancedSHE->EvalPolyWithPrecomp(powers, coefficients);
+    }
+
+    template <typename VectorDataType = double>
+    Ciphertext<Element> EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<Element>> powers,
+                                            const std::vector<VectorDataType>& coefficients, bool fused) const {
+        VerifyAdvancedSHEEnabled(__func__);
+        return m_AdvancedSHE->EvalPolyWithPrecomp(powers, coefficients, fused);
     }
 
     template <typename VectorDataType = double>

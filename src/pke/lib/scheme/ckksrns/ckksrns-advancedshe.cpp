@@ -295,7 +295,8 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalLinearWSumMutable(std::vector<Ciphe
 
 template <typename VectorDataType>
 std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersLinear(ConstCiphertext<DCRTPoly>& x,
-                                                                 const std::vector<VectorDataType>& coefficients) {
+                                                                 const std::vector<VectorDataType>& coefficients,
+                                                                 bool fused = false) {
     const uint32_t k = coefficients.size() - 1;
     std::vector<bool> indices(k);
 
@@ -328,7 +329,10 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersLinear(ConstCiphertext
     for (uint32_t i = 2; i <= k; ++i) {
         if (0 == (i & (i - 1))) {
             powers[i - 1] = cc->EvalSquare(powers[i / 2 - 1]);
-            cc->ModReduceInPlace(powers[i - 1]);
+            if (fused)
+                cc->GetScheme()->ModReduceInternalInPlace(powers[i - 1], compositeDegree);
+            else
+                cc->ModReduceInPlace(powers[i - 1]);
         } else {
             if (indices[i - 1]) {
                 uint64_t p = (uint64_t(1) << (GetMSB(i) - 1)) - 1;
@@ -337,23 +341,30 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersLinear(ConstCiphertext
                 cc->LevelReduceInPlace(powers[r], nullptr, diff / compositeDegree);
 
                 powers[i - 1] = cc->EvalMult(powers[p], powers[r]);
-                cc->ModReduceInPlace(powers[i - 1]);
+                if (fused)
+                    cc->GetScheme()->ModReduceInternalInPlace(powers[i - 1], compositeDegree);
+                else
+                    cc->ModReduceInPlace(powers[i - 1]);
             }
         }
     }
 
-    // brings all powers of x to the same level
-    for (uint32_t i = 1; i < k; ++i) {
-        if (indices[i - 1]) {
-            uint32_t diff = powers[k - 1]->GetLevel() - powers[i - 1]->GetLevel();
-            cc->LevelReduceInPlace(powers[i - 1], nullptr, diff / compositeDegree);
+    // brings all powers of x to the same level (skipped in the fused mode: the fused WSum's
+    // target_level folds each input's tower drop)
+    if (!fused) {
+        for (uint32_t i = 1; i < k; ++i) {
+            if (indices[i - 1]) {
+                uint32_t diff = powers[k - 1]->GetLevel() - powers[i - 1]->GetLevel();
+                cc->LevelReduceInPlace(powers[i - 1], nullptr, diff / compositeDegree);
+            }
         }
     }
 
     return std::make_shared<seriesPowers<DCRTPoly>>(std::move(powers));
 }
 
-std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersPS(ConstCiphertext<DCRTPoly>& x, uint32_t degree) {
+std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersPS(ConstCiphertext<DCRTPoly>& x, uint32_t degree,
+                                                             bool fused = false) {
     auto degs = ComputeDegreesPS(degree);
     uint32_t k = degs[0];
     uint32_t m = degs[1];
@@ -374,57 +385,98 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersPS(ConstCiphertext<DCR
         } else {
             uint32_t diff = powers[powerOf2 - 1]->GetLevel() - powers[rem - 1]->GetLevel();
             cc->LevelReduceInPlace(powers[rem - 1], nullptr, diff / compositeDegree);
-            powers[i - 1] = cc->EvalMult(powers[powerOf2 - 1], powers[rem - 1]);
+            if (!fused) {
+                powers[i - 1] = cc->EvalMult(powers[powerOf2 - 1], powers[rem - 1]);
+            } else {
+                // FIDESlib fused decomposition: x^i = x^{floor(i/2)} * x^{ceil(i/2)}
+                if (i & 1)
+                    powers[i - 1] = cc->EvalMult(powers[i / 2 - 1], powers[i / 2]);
+                else
+                    powers[i - 1] = cc->EvalSquare(powers[i / 2 - 1]);
+            }
         }
 
         if (++rem == powerOf2) {
             powerOf2 <<= 1;
             rem = 0;
         }
-        cc->ModReduceInPlace(powers[i - 1]);
+        if (fused)
+            cc->GetScheme()->ModReduceInternalInPlace(powers[i - 1], compositeDegree);
+        else
+            cc->ModReduceInPlace(powers[i - 1]);
     }
 
     const auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(powers[k - 1]->GetCryptoParameters());
-    if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
-        // brings all powers of x to the same level
-        uint32_t levelk = powers[k - 1]->GetLevel();
-        for (uint32_t i = 1; i < k; ++i)
-            cc->LevelReduceInPlace(powers[i - 1], nullptr, levelk - powers[i - 1]->GetLevel());
-    } else {
-        for (uint32_t i = 1; i < k; ++i)
-            cc->GetScheme()->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+    // brings all powers of x to the same level (skipped in the fused mode: the fused WSum's
+    // target_level folds each input's tower drop)
+    if (!fused) {
+        if (cryptoParams->GetScalingTechnique() == FIXEDMANUAL) {
+            // brings all powers of x to the same level
+            uint32_t levelk = powers[k - 1]->GetLevel();
+            for (uint32_t i = 1; i < k; ++i)
+                cc->LevelReduceInPlace(powers[i - 1], nullptr, levelk - powers[i - 1]->GetLevel());
+        } else {
+            for (uint32_t i = 1; i < k; ++i)
+                cc->GetScheme()->AdjustLevelsAndDepthInPlace(powers[i - 1], powers[k - 1]);
+        }
     }
 
     // computes powers of form k*2^i for x and the product of the powers in power2, that yield x^{k(2*m - 1)}
     std::vector<Ciphertext<DCRTPoly>> powers2(m);
+    std::vector<Ciphertext<DCRTPoly>> powers2NoRescale(m);
     powers2[0] = powers.back();
 
     auto power2km1 = powers.back();
 
     for (uint32_t i = 1; i < m; ++i) {
         powers2[i] = cc->EvalSquare(powers2[i - 1]);
-        cc->ModReduceInPlace(powers2[i]);
+        if (fused) {
+            // the fused PS evaluator requires powers2 at noise-scale-degree 1 and needs the
+            // unreduced copy for the add-before-rescale ordering
+            powers2NoRescale[i] = powers2[i]->Clone();
+            if (powers2[i]->GetNoiseScaleDeg() == 2)
+                cc->GetScheme()->ModReduceInternalInPlace(powers2[i], compositeDegree);
+        } else {
+            cc->ModReduceInPlace(powers2[i]);
+        }
         power2km1 = cc->EvalMult(powers2[i], power2km1);
         cc->ModReduceInPlace(power2km1);
     }
 
-    return std::make_shared<seriesPowers<DCRTPoly>>(std::move(powers), std::move(powers2), std::move(power2km1), k, m);
+    auto sp = std::make_shared<seriesPowers<DCRTPoly>>(std::move(powers), std::move(powers2), std::move(power2km1), k, m);
+    if (fused)
+        sp->powers2NoRescaleRe = std::move(powers2NoRescale);
+    return sp;
 }
 
 std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(ConstCiphertext<DCRTPoly>& x,
                                                                        const std::vector<int64_t>& coefficients) const {
+    return EvalPowers(x, coefficients, false);
+}
+std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(ConstCiphertext<DCRTPoly>& x,
+                                                                       const std::vector<int64_t>& coefficients,
+                                                                       bool fused) const {
     uint32_t d = Degree(coefficients);
-    return (d < 5) ? internalEvalPowersLinear(x, coefficients) : internalEvalPowersPS(x, d);
+    return (d < 5) ? internalEvalPowersLinear(x, coefficients, fused) : internalEvalPowersPS(x, d, fused);
 }
 std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(ConstCiphertext<DCRTPoly>& x,
                                                                        const std::vector<double>& coefficients) const {
+    return EvalPowers(x, coefficients, false);
+}
+std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(ConstCiphertext<DCRTPoly>& x,
+                                                                       const std::vector<double>& coefficients,
+                                                                       bool fused) const {
     uint32_t d = Degree(coefficients);
-    return (d < 5) ? internalEvalPowersLinear(x, coefficients) : internalEvalPowersPS(x, d);
+    return (d < 5) ? internalEvalPowersLinear(x, coefficients, fused) : internalEvalPowersPS(x, d, fused);
 }
 std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(
         ConstCiphertext<DCRTPoly>& x, const std::vector<std::complex<double>>& coefficients) const {
+    return EvalPowers(x, coefficients, false);
+}
+std::shared_ptr<seriesPowers<DCRTPoly>> AdvancedSHECKKSRNS::EvalPowers(
+        ConstCiphertext<DCRTPoly>& x, const std::vector<std::complex<double>>& coefficients, bool fused) const {
     uint32_t d = Degree(coefficients);
-    return (d < 5) ? internalEvalPowersLinear(x, coefficients) : internalEvalPowersPS(x, d);
+    return (d < 5) ? internalEvalPowersLinear(x, coefficients, fused) : internalEvalPowersPS(x, d, fused);
 }
 
 // The powers may be a precomputation shared across several polynomials (EvalPolyWithPrecomp), so every
@@ -576,6 +628,124 @@ Ciphertext<DCRTPoly> internalEvalPolyPSWithPrecomp(const std::shared_ptr<seriesP
     return result;
 }
 
+// FIDESlib fused (value-level, non-optimized CPU reference) Patterson-Stockmeyer evaluator:
+// same algebra as InnerEvalPolyPS, but the constant term is folded as the WSum bias, the x^k
+// term is an extra weight, and the composition does mult -> add without the trailing rescale
+// (the caller owns the single ModReduce). Transcribed from the FIDESlib GPU
+// innerEvalPolyPSFused (ApproxModEval.cu) so the two are bit-exact. The CPU version runs the
+// serial FULL mode; the RECORD/REMAINING batching on the GPU reorders identical per-node
+// operations, so the bits are the same.
+template <typename VectorDataType>
+Ciphertext<DCRTPoly> InnerEvalPolyPSFused(ConstCiphertext<DCRTPoly>& x,
+                                          const std::vector<VectorDataType>& coefficients, uint32_t k, uint32_t m,
+                                          const std::vector<Ciphertext<DCRTPoly>>& powers,
+                                          const std::vector<Ciphertext<DCRTPoly>>& powers2,
+                                          const std::vector<Ciphertext<DCRTPoly>>& powers2NoRescale,
+                                          int32_t levelOffset = 0) {
+    // Compute k*2^{m-1}-k because we use it a lot
+    uint32_t k2m2k = k * (1 << (m - 1)) - k;
+
+    // Divide coefficients by x^{k*2^{m-1}}
+    std::vector<VectorDataType> xkm(k2m2k + k + 1);
+    xkm.back() = 1;
+    auto divqr   = LongDivisionPoly(coefficients, xkm);
+
+    // Subtract x^{k(2^{m-1} - 1)} from r
+    auto& r2 = divqr->r;
+    if (auto n = Degree(r2); static_cast<int32_t>(k2m2k - n) <= 0) {
+        r2.resize(n + 1);
+        r2[k2m2k] -= 1;
+    } else {
+        r2.resize(k2m2k + 1);
+        r2.back() = -1;
+    }
+
+    auto divcs = LongDivisionPoly(r2, divqr->q);
+    auto cc    = x->GetCryptoContext();
+
+    Ciphertext<DCRTPoly> cu, qu, su;
+    const int32_t targetBase =
+            static_cast<int32_t>(powers2[m - 1]->GetLevel()) + (powers2[m - 1]->GetNoiseScaleDeg() == 1 ? 1 : 0);
+
+    // q branch: qu = q[0] + x^k + sum_{i=1..k-1} q[i]*x^i as one fused WSum
+    if (Degree(divqr->q) > k) {
+        qu = InnerEvalPolyPSFused(x, divqr->q, k, m - 1, powers, powers2, powers2NoRescale, levelOffset);
+        cc->ModReduceInPlace(qu);
+    } else {
+        auto v = divqr->q;
+        v.resize(k + 1);
+        v[k] = (VectorDataType)1;
+        qu   = EvalPartialLinearWSumWithBias(powers, v, v.front(), k, targetBase - levelOffset, true);
+    }
+
+    // s branch: mirror of the q branch, WITHOUT the trailing rescale (the composition reduces once)
+    auto& s2 = divcs->r;
+    s2.resize(k2m2k + 1);
+    s2.back() = 1;
+    if (Degree(s2) > k) {
+        su = InnerEvalPolyPSFused(x, s2, k, m - 1, powers, powers2, powers2NoRescale, levelOffset + 1);
+    } else {
+        auto v = s2;
+        v.resize(k + 1);
+        v[k] = (VectorDataType)1;
+        su   = EvalPartialLinearWSumWithBias(powers, v, v.front(), k, targetBase - levelOffset - 1, false);
+    }
+
+    // c branch: cu = powers2[m-1] + sum_{i=1..n} q[i]*x^i + q[0]
+    if (uint32_t n = Degree(divcs->q); n == 0) {
+        cu = cc->EvalAdd(powers2[m - 1], divcs->q.front());
+    } else {
+        cu = EvalPartialLinearWSumWithBias(powers, divcs->q, divcs->q.front(), n, targetBase - levelOffset, false);
+        if (cu->GetLevel() == powers2NoRescale[m - 1]->GetLevel()) {
+            cc->EvalAddInPlace(cu, powers2NoRescale[m - 1]);
+            cc->ModReduceInPlace(cu);
+        } else {
+            cc->ModReduceInPlace(cu);
+            cc->EvalAddInPlace(cu, powers2[m - 1]);
+        }
+    }
+
+    // result = EvalMult(cu, qu) + su  (no trailing ModReduce: the caller rescales)
+    auto result = cc->EvalMult(cu, qu);
+    cc->EvalAddInPlace(result, su);
+    return result;
+}
+
+template <typename VectorDataType>
+Ciphertext<DCRTPoly> internalEvalPolyPSWithPrecompFused(const std::shared_ptr<seriesPowers<DCRTPoly>>& ctxtPowers,
+                                                        const std::vector<VectorDataType>& coefficients) {
+    auto& powers          = ctxtPowers->powersRe;
+    auto& powers2         = ctxtPowers->powers2Re;
+    auto& powers2NoRescale = ctxtPowers->powers2NoRescaleRe;
+    auto& power2km1       = ctxtPowers->power2km1Re;
+    auto k                = ctxtPowers->k;
+    auto m                = ctxtPowers->m;
+
+    uint32_t k2m2k = k * (1 << (m - 1)) - k;
+
+    auto f2 = coefficients;
+    f2.resize(Degree(f2) + 1);
+    f2.resize(2 * k2m2k + k + 1);
+    f2.back() = 1;
+
+    auto result = InnerEvalPolyPSFused(powers[0], f2, k, m, powers, powers2, powers2NoRescale, 0);
+    // the composition tree no longer rescales internally; the root owns the single ModReduce
+    auto cc = powers[0]->GetCryptoContext();
+    cc->ModReduceInPlace(result);
+    cc->EvalSubInPlace(result, power2km1);
+    return result;
+}
+
+template <typename VectorDataType>
+Ciphertext<DCRTPoly> internalEvalPolyWithPrecomp(const std::shared_ptr<seriesPowers<DCRTPoly>>& ctxtPowers,
+                                                 const std::vector<VectorDataType>& coeffs, bool fused) {
+    if (Degree(coeffs) < 5)
+        return internalEvalPolyLinearWithPrecomp(ctxtPowers->powersRe, coeffs);
+    if (!fused)
+        return internalEvalPolyPSWithPrecomp(ctxtPowers, coeffs);
+    return internalEvalPolyPSWithPrecompFused(ctxtPowers, coeffs);
+}
+
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPoly(ConstCiphertext<DCRTPoly>& x,
                                                   const std::vector<int64_t>& coeffs) const {
     return (Degree(coeffs) < 5) ? EvalPolyLinear(x, coeffs) : EvalPolyPS(x, coeffs);
@@ -591,18 +761,28 @@ Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPoly(ConstCiphertext<DCRTPoly>& x,
 
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
                                                              const std::vector<int64_t>& coeffs) const {
-    return (Degree(coeffs) < 5) ? internalEvalPolyLinearWithPrecomp(ctxtPowers->powersRe, coeffs) :
-                                  internalEvalPolyPSWithPrecomp(ctxtPowers, coeffs);
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, false);
+}
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
+                                                             const std::vector<int64_t>& coeffs, bool fused) const {
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, fused);
 }
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
                                                              const std::vector<double>& coeffs) const {
-    return (Degree(coeffs) < 5) ? internalEvalPolyLinearWithPrecomp(ctxtPowers->powersRe, coeffs) :
-                                  internalEvalPolyPSWithPrecomp(ctxtPowers, coeffs);
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, false);
+}
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
+                                                             const std::vector<double>& coeffs, bool fused) const {
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, fused);
 }
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
                                                              const std::vector<std::complex<double>>& coeffs) const {
-    return (Degree(coeffs) < 5) ? internalEvalPolyLinearWithPrecomp(ctxtPowers->powersRe, coeffs) :
-                                  internalEvalPolyPSWithPrecomp(ctxtPowers, coeffs);
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, false);
+}
+Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyWithPrecomp(std::shared_ptr<seriesPowers<DCRTPoly>> ctxtPowers,
+                                                             const std::vector<std::complex<double>>& coeffs,
+                                                             bool fused) const {
+    return internalEvalPolyWithPrecomp(ctxtPowers, coeffs, fused);
 }
 
 Ciphertext<DCRTPoly> AdvancedSHECKKSRNS::EvalPolyLinear(ConstCiphertext<DCRTPoly>& x,
@@ -820,30 +1000,37 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalChebyPolysPS(ConstCiphertext
     // computes linear transformation y = -1 + 2 (x-a)/(b-a)
     // consumes one level when a <> -1 && b <> 1
     auto cc = x->GetCryptoContext();
+    auto cryptoParams = std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters());
+    const uint32_t compositeDegree = cryptoParams->GetCompositeDegree();
+    const bool fixedManual          = (cryptoParams->GetScalingTechnique() == FIXEDMANUAL);
+
     std::vector<Ciphertext<DCRTPoly>> T(k);
+    // FIXEDMANUAL only: unreduced (noise-scale-degree 2) copy of T[0], used by the odd-T subtract so
+    // the "- y" happens before the rescale (mirrors the FIDESlib GPU transcription).
+    std::vector<Ciphertext<DCRTPoly>> T_norescale;
     T[0] = x->Clone();
-    if (T[0]->GetNoiseScaleDeg() == 2) {
-        uint32_t compositeDegree =
-                std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters())->GetCompositeDegree();
-        cc->GetScheme()->ModReduceInternalInPlace(T[0], compositeDegree);
-    }
     if (IsNotEqualNegOne(a) || IsNotEqualOne(b)) {
         // linear transformation is needed
         double alpha = 2 / (b - a);
-        double beta = a * alpha;
-        T[0] = x->Clone();
+        double beta  = a * alpha;
 
         if (IsNotEqualOne(alpha)) {
+            // normalize an unreduced input before the scalar multiply (FIDESlib does x.rescaleInternal())
+            if (T[0]->GetNoiseScaleDeg() == 2)
+                cc->GetScheme()->ModReduceInternalInPlace(T[0], compositeDegree);
             cc->EvalMultInPlace(T[0], alpha);
         }
         if (IsNotEqualZero(-1.0 - beta))
             cc->EvalAddInPlace(T[0], -1.0 - beta);
-        if (T[0]->GetNoiseScaleDeg() == 2) {
-            uint32_t compositeDegree =
-                    std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters())->GetCompositeDegree();
-            cc->GetScheme()->ModReduceInternalInPlace(T[0], compositeDegree);
-        }
     }
+    if (fixedManual) {
+        T_norescale.emplace_back(T[0]->Clone());
+        // force noise-scale-degree 2 so the odd-T subtract below matches the unreduced T[0]
+        if (T_norescale[0]->GetNoiseScaleDeg() == 1)
+            cc->EvalMultInPlace(T_norescale[0], 1.0);
+    }
+    if (T[0]->GetNoiseScaleDeg() == 2)
+        cc->GetScheme()->ModReduceInternalInPlace(T[0], compositeDegree);
 
     std::vector<Ciphertext<DCRTPoly>> T2(m);
     // Computes Chebyshev polynomials up to degree k
@@ -854,17 +1041,15 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalChebyPolysPS(ConstCiphertext
             // compute T_{2i+1}(y) = 2*T_i(y)*T_{i+1}(y) - y
             T[i - 1] = cc->EvalMult(T[i / 2 - 1], T[i / 2]);
             cc->EvalAddInPlaceNoCheck(T[i - 1], T[i - 1]);
-            uint32_t compositeDegree =
-                    std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters())->GetCompositeDegree();
+            // subtract "- y" BEFORE the rescale (FIDESlib order); FIXEDMANUAL subtracts the
+            // unreduced T[0] so the noise-scale degrees match the unreduced product.
+            cc->EvalSubInPlace(T[i - 1], fixedManual ? T_norescale[0] : T[0]);
             cc->GetScheme()->ModReduceInternalInPlace(T[i - 1], compositeDegree);
-            cc->EvalSubInPlace(T[i - 1], T[0]);
         } else {
             // compute T_{2i}(y) = 2*T_i(y)^2 - 1
             T[i - 1] = cc->EvalSquare(T[i / 2 - 1]);
             cc->EvalAddInPlaceNoCheck(T[i - 1], T[i - 1]);
             cc->EvalAddInPlace(T[i - 1], -1.0);
-            uint32_t compositeDegree =
-                    std::dynamic_pointer_cast<CryptoParametersCKKSRNS>(x->GetCryptoParameters())->GetCompositeDegree();
             cc->GetScheme()->ModReduceInternalInPlace(T[i - 1], compositeDegree);
         }
     }
