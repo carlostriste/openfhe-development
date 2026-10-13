@@ -388,11 +388,10 @@ std::shared_ptr<seriesPowers<DCRTPoly>> internalEvalPowersPS(ConstCiphertext<DCR
             if (!fused) {
                 powers[i - 1] = cc->EvalMult(powers[powerOf2 - 1], powers[rem - 1]);
             } else {
-                // FIDESlib fused decomposition: x^i = x^{floor(i/2)} * x^{ceil(i/2)}
-                if (i & 1)
-                    powers[i - 1] = cc->EvalMult(powers[i / 2 - 1], powers[i / 2]);
-                else
-                    powers[i - 1] = cc->EvalSquare(powers[i / 2 - 1]);
+                // FIDESlib fused decomposition: x^i = x^{floor(i/2)} * x^{ceil(i/2)}. This mirrors the
+                // GPU unconditionally (its `if (i & 1 == 0)` condition is a precedence no-op), so the
+                // even case is an EvalMult(x^{i/2}, x^{i/2}), not EvalSquare, to stay bit-exact.
+                powers[i - 1] = cc->EvalMult(powers[i / 2 - 1], powers[i / 2 - 1 + (i & 1)]);
             }
         }
 
