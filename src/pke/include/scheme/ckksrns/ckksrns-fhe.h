@@ -755,6 +755,21 @@ class FHECKKSRNS : public FHERNS {
      * @param radix accumulation branching factor (power of two; 2 = plain doubling)
      */
     static void EvalPartialSumInPlace(Ciphertext<DCRTPoly>& ct, uint32_t stride, uint32_t size, uint32_t radix);
+    /**
+     * Rotation fold with a start offset: as above but the first level starts at
+     * `startFactor*stride` instead of `stride` (levels s = startFactor, startFactor*radix, ...).
+     * Folds ct = sum_{j=0}^{size/startFactor - 1} Rotate(ct, j * startFactor * stride) with the
+     * same radix level structure and the same lazy extended-basis accumulation (element 0 settles
+     * once, element 1 per level) - mirroring FIDESlib's unified start-aware Accumulate. A
+     * start-offset doubling (radix 2) is exactly the plain doubling of the remaining range.
+     * @param ct input/output ciphertext
+     * @param stride slot distance between consecutive summands
+     * @param size number of summands (power of two)
+     * @param radix accumulation branching factor (power of two; 2 = plain doubling)
+     * @param startFactor first-level factor (power of two; 1 = the plain fold)
+     */
+    static void EvalPartialSumInPlace(Ciphertext<DCRTPoly>& ct, uint32_t stride, uint32_t size, uint32_t radix,
+                                      uint32_t startFactor);
 
     //------------------------------------------------------------------------------
     // SERIALIZATION
